@@ -173,26 +173,52 @@ def update_alf_bias(router, gate, top_idx, gamma=0.001, mode='v3_sign'):
 
 ### 3.3 辅助 seq-aux loss（α=1e-4，保险丝）
 
+**严格按 V3 paper Eq. 16-20 实现**：
+
+- Eq. 16（实际路由）：`Topk({s_{j,t} + b_j}, K)` — 用 **biased** 分数
+- Eq. 18（seq-aux 的 f_i）：`Topk({s_{j,t}}, K)` — 用 **unbiased** raw sigmoid 分数 ⚠️
+- Eq. 19-20：P 用 per-token L1 归一化 `s'_{i,t} = s_{i,t} / Σ_j s_{j,t}`，再序列内 mean
+
+**关键**：seq-aux 内部**自己重新算一次 unbiased Top-K**，**不能**接 forward 路径的 `top_idx`（那个是 biased 的）。
+
 ```python
 # 加到 main loss
-def seq_aux_loss(gate, top_idx, alpha=1e-4):
-    # gate: [B, S, N], top_idx: [B, S, K]
-    B, S, N = gate.shape
-    K = top_idx.shape[-1]
+def seq_aux_loss(gate_raw, K, alpha=1e-4):
+    """V3 paper §2.1.2 Eq. 16-20 严格实现。
 
-    # f_i^(b): 每个 sequence 中分配到 expert i 的 token 比例
-    f = torch.zeros(B, N, device=gate.device)
-    onehot = F.one_hot(top_idx, N).sum(dim=-2).float()  # [B, S, N]
-    f = onehot.mean(dim=1) * (N / K)  # [B, N]
+    Args:
+        gate_raw: [B, S, N] 不带 bias 的 sigmoid 输出（FP32）
+        K:        top-K 数（路由用的同一个 K）
+        alpha:    V3=1e-4, Ling=1e-4, GLM-4.5=1e-4
 
-    # P_i^(b): 每个 sequence 平均的 gate 概率
-    P = gate.mean(dim=1)  # [B, N]
+    Returns:
+        scalar loss
+    """
+    B, S, N = gate_raw.shape
 
-    L_aux = (f * P).sum(-1).mean() * alpha  # 单 scalar
-    return L_aux
+    # ---- f_i: Eq. 18, top-K over UNBIASED 分数 ----
+    # ★ 注意: 这里重新做一次 topk, 不能复用 forward 的 biased top_idx
+    _, unbiased_top_idx = gate_raw.topk(K, dim=-1)  # [B, S, K]
+    onehot = F.one_hot(unbiased_top_idx, num_classes=N).sum(dim=-2).float()  # [B, S, N]
+    counts = onehot.sum(dim=1)  # [B, N]
+    f = counts * (N / (K * S))  # scaled so mean(f) = 1 per sequence
+
+    # ---- P_i: Eq. 19-20, per-token L1 normalize then mean over seq ----
+    s_prime = gate_raw / (gate_raw.sum(dim=-1, keepdim=True) + 1e-20)
+    P = s_prime.mean(dim=1)  # [B, N]
+
+    # ---- L_Bal: Eq. 17, per-sequence then batch-mean ----
+    per_seq_loss = (f.detach() * P).sum(dim=-1)  # [B]
+    return alpha * per_seq_loss.mean()
 ```
 
-**注意**：Ling 2.0 在 8B+ 上用 α=1e-4；本 T2.1 arm A 不消融这个值（α 在 T2.5 不在 T2.1）。
+**为什么 f_i 用 unbiased Top-K**（V3 paper Eq. 18 的设计选择）：
+
+- seq-aux 是要逼 router **自己**学到平衡 —— 不是检查 "bias 是否把不平衡修好了"
+- 用 unbiased Top-K → loss 测的是 router 原始倾向，bias 不掺和 → router 学到本征均衡
+- 用 biased Top-K（错误做法）→ router 可以摆烂依赖 bias 兜底
+
+**注意**：Ling 2.0 在 8B+ 上用 α=1e-4；本 T2.1 arm A 不消融这个值（α 在 T2.5 不在 T2.1）。GLM-4.5 paper §2.4 明确同样 α=1e-4。
 
 ---
 
@@ -420,8 +446,10 @@ class MoELayer(nn.Module):
             return switch_aux_loss(self._gate_cache, self._idx_cache,
                                    alpha=0.01)
         elif self.mode == 'sigmoid_alf':
-            return seq_aux_loss(self._gate_cache, self._idx_cache,
-                               alpha=1e-4)
+            # ★ 不传 self._idx_cache (那是 biased top-K); seq_aux_loss 内部
+            # 用 unbiased gate_raw 重新算 Top-K, 严格按 V3 paper Eq. 18
+            K = self._idx_cache.shape[-1]
+            return seq_aux_loss(self._gate_cache, K, alpha=1e-4)
         return 0.0
 
 # Training loop integration
