@@ -7,7 +7,7 @@
 
 ## TL;DR
 
-Ling 2.0 是 **"统一 scaling law 驱动的 16B → 100B → 1T 三档同构家族"**，所有三个模型用**完全相同的核心配方**（256 routed + 1 shared + top-8 + 3.5% 激活率 + MTP D=1 + partial RoPE + QK-Norm + WSM scheduler），只在 layer / hidden / heads 上 scale up。三大独特贡献：
+Ling 2.0 是 **"统一 scaling law 驱动的 16B → 100B → 1T 三档同构家族"**，所有三个模型用**完全相同的核心配方**（256 routed + 1 shared + top-8 → **expert-slot fraction ≈3.5%**；active/total params 见下表为 8.75% / 5.9% / 5.1% + MTP D=1 + partial RoPE + QK-Norm + WSM scheduler），只在 layer / hidden / heads 上 scale up。三大独特贡献：
 
 1. **Ling Scaling Law** (Tian et al. 2025a) —— EL(A, G, C) 公式，**激活率 A 是 efficiency 主驱动**，granularity G 是非线性 modulator (最优 8-12)，compute C 有 amplification effect。1000 次实验拟合，validation MSE < 0.01
 2. **Ling Wind Tunnel** —— 5 个 500M-8B 模型组成的标准化实验流水，**单次 ablation 成本仅传统方法 35%**，所有新想法先走 wind tunnel 再上 1T

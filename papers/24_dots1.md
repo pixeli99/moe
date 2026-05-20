@@ -29,7 +29,9 @@ dots.llm1 是 **142B 总参 / 14B 激活**的 MoE 基础模型，单节点 8×H8
 | Dense FFN intermediate | **10944**（仅第 0 层） |
 | **MoE expert intermediate** | **1408** |
 | **N_routed / Top-K / N_shared** | **128 / 6 / 2** → 8 active experts/token |
-| **Activation ratio** | ≈ 4.7%（vs Ling 2.0 的 3.5%；vs V3 的 5.5%） |
+| **Active/Total params** | **≈ 9.9%** (14B/142B) |
+| **Expert-slot fraction** `(K+N_sh)/(N_rt+N_sh)` | **≈ 6.2%** (8/130) |
+| **Routed-only fraction** `K/N_rt` | **≈ 4.7%** (6/128) |
 | **Dense 前缀层** (`first_k_dense_replace`) | **1** |
 | Routing gate | **Sigmoid + Top-K + 归一化** (`scoring_func=sigmoid`, `topk_method=noaux_tc`, `norm_topk_prob=true`) |
 | **`routed_scaling_factor`** | **2.5** ⚡（**与 Ling 2.0 完全一致**，是继承指纹） |
@@ -49,7 +51,7 @@ dots.llm1 是 **142B 总参 / 14B 激活**的 MoE 基础模型，单节点 8×H8
 
 | 项 | dots1 (2025-06) | Ling 2.0 (2025-10) | DeepSeek V3 (2024-12) |
 |---|---|---|---|
-| 总参 / 激活 | 142B / 14B (4.7%) | 16B/103B/1T，3.5% | 671B / 37B (5.5%) |
+| 总参 / 激活 (active/total) | 142B / 14B (**9.9%**) | 16B/103B/1T (**8.75% / 5.9% / 5.1%**；expert-slot ≈3.5%) | 671B / 37B (**5.5%**) |
 | 路由 gate | sigmoid + noaux_tc | sigmoid + noaux_tc | sigmoid + noaux_tc |
 | `routed_scaling_factor` | **2.5** | **2.5** | 2.5（V3 也用此值） |
 | Bias update | V3 sign(e_i) | **Ling 零均值** sign−mean(sign) | V3 sign(e_i) |
@@ -63,7 +65,7 @@ dots.llm1 是 **142B 总参 / 14B 激活**的 MoE 基础模型，单节点 8×H8
 | 精度 | BF16（gating FP32） | **FP8** (1T 全 FP8) | FP8 + BF16 critical path |
 | 推理框架 | vLLM | — | — |
 
-> **指纹判断**：dots1 → Ling 2.0 的继承是 routing 配方层面（sigmoid + noaux_tc + 2.5 scaling + first_k_dense + QK-Norm 这一整套）。Ling 2.0 在此之上的**新动作**是：(1) zero-mean bias 修正、(2) 把稀疏度从 4.7% → 3.5%、(3) FP8 全程、(4) WSD → WSM。**所以"ling 2.0 用 dots1 的策略"准确说法是**："Ling 2.0 在 dots1/V3 的 routing 配方上多加了零均值修正，并把架构推向更稀疏 + FP8"。
+> **指纹判断**：dots1 → Ling 2.0 的继承是 routing 配方层面（sigmoid + noaux_tc + 2.5 scaling + first_k_dense + QK-Norm 这一整套）。Ling 2.0 在此之上的**新动作**是：(1) zero-mean bias 修正、(2) 把架构推向更稀疏（**dots1 active/total 9.9% → Ling-flash-2.0 5.9%**；**expert-slot fraction 6.2% → 3.5%**）、(3) FP8 全程、(4) WSD → WSM。**所以"ling 2.0 用 dots1 的策略"准确说法是**："Ling 2.0 在 dots1/V3 的 routing 配方上多加了零均值修正，并把架构推向更稀疏 + FP8"。
 
 ## 核心方法 / 创新点
 

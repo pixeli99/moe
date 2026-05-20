@@ -8,10 +8,10 @@
 
 ## TL;DR
 
-Ling 2.0 是蚂蚁 Inclusion AI 的 reasoning-oriented MoE 基础系列，覆盖 16B → 1T 三档（Ling-mini-2.0 / Ling-flash-2.0 / Ling-1T），统一 "**high-sparsity + fine-grained**" 架构，所有规模 **256 routed experts + top-8 + 1 shared**（~3.5% 激活）。核心贡献：
+Ling 2.0 是蚂蚁 Inclusion AI 的 reasoning-oriented MoE 基础系列，覆盖 16B → 1T 三档（Ling-mini-2.0 / Ling-flash-2.0 / Ling-1T），统一 "**high-sparsity + fine-grained**" 架构，所有规模 **256 routed experts + top-8 + 1 shared**（**expert-slot fraction (8+1)/(256+1) ≈ 3.5%**；active/total params 分别为 **8.75% / 5.9% / 5.1%**，见 Table 1）。核心贡献：
 
 1. **Ling Scaling Laws + Ling Wind Tunnel**：用 ~1000 个小规模实验拟合 hyperparameter & 架构 scaling law，用 500M–8B 的 5 个 anchor 模型把 1T 训练前的验证成本压到 < 1% full-run。
-2. **7× efficiency leverage**：3.5% 激活的 MoE = 7× dense 等效 compute，理论上由 scaling law 预测、实验上由三档模型验证。
+2. **7× efficiency leverage**：在该稀疏档（expert-slot ≈3.5%，active/total ≈5-9%）的 MoE = 7× dense 等效 compute，理论上由 scaling law 预测、实验上由三档模型验证。
 3. **WSM (Warmup-Stable-Merge) scheduler**：用 checkpoint 平均替代 LR decay，比 WSD 平均 benchmark 提升 1–2 分，**无需事前定 decay 起点**。
 4. **全 FP8 训练 1T 模型**：fine-grained tile-wise quantization，900B token 后 vs BF16 gap ≤ 0.25%。
 5. **DFT + Evo-CoT + LPO**：post-training 三件套：Decoupled Fine-Tuning（同一模型两种 system prompt 模式）、Evolutionary Chain-of-Thought RL、Linguistic-unit (sentence-level) Policy Optimization。
@@ -29,7 +29,8 @@ Ling 2.0 是蚂蚁 Inclusion AI 的 reasoning-oriented MoE 基础系列，覆盖
 | **N_experts (total)** | **256** | **256** | **256** |
 | **Top-K** | **8** | **8** | **8** |
 | **N_shared** | **1** | **1** | **1** |
-| **Activation ratio** | ≈ 3.5% | ≈ 3.5% | ≈ 3.5% |
+| **Active/Total params** | **8.75%** (1.4/16) | **5.9%** (6.1/103) | **5.1%** (51/1000) |
+| **Expert-slot fraction** `(K+N_sh)/(N_rt+N_sh)` | ≈ 3.5% | ≈ 3.5% | ≈ 3.5% |
 | Num attention heads | 16 | 32 | 64 |
 | Head dim | 128 | 128 | 128 |
 | Num KV heads (GQA) | 8 / 16 / 32 (one of these per Section 2.1) | 同 | 同 |
@@ -68,7 +69,7 @@ EL(A, G, C) = Â^(α + γ·(log G)² + β·log G)
 - `G` = expert 粒度（active expert 数）→ log-polynomial 调制，**最优区间 8–12**
 - `C` = compute budget → amplification factor，越大 EL 越大
 
-→ Ling 2.0 选 **256 expert / 8 active / 1 shared = 3.5% 激活**，scaling law **预测 > 7× EL**。三档模型实测验证：
+→ Ling 2.0 选 **256 routed + 8 active + 1 shared**（**expert-slot ≈3.5%**；按 active/total params 主口径 mini/flash/1T 分别为 **8.75% / 5.9% / 5.1%**），scaling law **预测 > 7× EL**。三档模型实测验证：
 
 > "Both Ling-mini-2.0-base, Ling-flash-2.0-base, and Ling-1T-base achieve performance comparable or superior to other state-of-the-art open-source models of similar scale... using less than one-seventh of their non-embedding activated parameters, confirming the 7× efficiency leverage."
 
@@ -230,7 +231,7 @@ clip ε = 0.03。比 GRPO/GSPO 训练曲线更平滑，AIME 2025 上显著领先
    - hidden=2048, layers=20, FFN=5120
    - N=256 routed + top-8 + 1 shared, expert_dim=512
    - 16 attn heads, head_dim=128, GQA (8 KV heads)
-   - 3.5% 激活
+   - active/total ≈ 8.75%（expert-slot 口径 ≈3.5%）
    - **首 1 层 dense**（不是 K2 的 1 层 dense 但 N=384，也不是 V3 的 3 层）
 
 2. **Ling Wind Tunnel 方法论**：在做 16B MoE 之前，先跑 5 个小 anchor（比如 500M / 1B / 2B / 4B / 8B），用 scaling law 拟合，能把架构决策 (dense 层数、shared expert 配比、expert 粒度) 验证成本压到 < 1% full-run。这是最有 leverage 的做法。

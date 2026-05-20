@@ -8,8 +8,8 @@
 
 ## 1. TL;DR（六条核心结论）
 
-1. **激活率收敛到 1/15 ± 1/8**：极稀疏端 Ling-mini-2.0/Qwen3-Next 的 1/32 与极稠密端 OLMoE/JetMoE 的 1/4 之间，**主流卡在 1/12 ~ 1/16**（V3=18×, Hunyuan-Large=7.5×, K2=31×, Mixtral=6×, Qwen3-30B=10×）。激活率单点不能优化目标，要与 active params 一同决策。
-2. **Top-K 标准化到 8**：2024 主流是 2（Mixtral / DBRX / Grok-1 / Phi-3.5 / Switch top-1）；2025 之后**新模型几乎全 K=8**（V3, Hunyuan-Large, Ling 全系, GLM-4.5, dots1, ERNIE 4.5, MiniMax-M2, gpt-oss=4 是少数例外）。Llama 4 走 K=1 是极端反例。
+1. **激活率（active params / total params）收敛到 1/15 ± 1/8**：⚠️ **本表所有"激活率"统一为 active/total params 主口径**（不是 expert-slot fraction）。极稀疏端 Qwen3-Next (3.8%, 1/26) / LongCat (4.8%, 1/21) / K2 (3.2%, 1/31) 与极稠密端 OLMoE / JetMoE (1/4-1/5) 之间，**主流卡在 1/12 ~ 1/16**（V3=18×, Hunyuan-Large=7.5×, Mixtral=6×, Qwen3-30B=10×）。注意 "expert-slot fraction" 是另一口径：Ling 全系 (8+1)/(256+1) ≈ 3.5%，dots1 (6+2)/(128+2) ≈ 6.2% —— 这跟 active/total 数值上不同，引用时必须标明。
+2. **Top-K 标准化到 8**：2024 主流是 2（Mixtral / DBRX / Grok-1 / Phi-3.5 / Switch top-1）；2025 之后**新模型几乎全 K=8**（V3, Ling 全系, GLM-4.5, dots1, ERNIE 4.5, MiniMax-M2；gpt-oss=4 是少数例外）。**Hunyuan-Large 与 Llama 4 走 K=1** 是反例（注意 Hunyuan-Large 是 K=1 routed + 1 shared 而不是 K=8）。
 3. **Sigmoid + ALF 已成 2025+ 默认路由**：DeepSeek-V3 起的 `sigmoid gate + Aux-Loss-Free bias` 范式被 Ling 全系 / GLM-4.5 / Moonlight / dots1（部分）/ Qwen3-Coder 继承；老派 `softmax + aux-loss` 仍是 Mixtral / Qwen3-Dense 系 / Llama 4 / gpt-oss 的选择。**两个生态目前各占一半，但增长在 sigmoid 一侧**。
 4. **共享专家是"国产派 vs 西方派"分水岭**：DeepSeek 系 / Qwen 系（除 Qwen3-Coder/235B-2507）/ Ling / Hunyuan / Pangu / GLM 全用 1 个 shared expert；Mixtral / DBRX / OLMoE / gpt-oss / Grok 全不用。Llama 4 用"shared MLP + routed 1 expert"是特殊形态。
 5. **MTP 与 hybrid attention 是 2025+ 两条上行曲线**：MTP 从 V3 (1 chain) 扩散到 GLM-4.5 / Ling-1T / Ring-1T / Qwen3-Next / MiniMax-M2 (D=3)；hybrid attention（Mamba/SSM 或 Linear+softmax 交替）从 Jamba / BlackMamba 扩散到 MiniMax-01/M1 / Granite 4 / Nemotron-3 Nano / Qwen3-Next / Hunyuan-Turbo-S。
@@ -83,7 +83,7 @@
 | 58 | **DeepSeek-V3.1** | DeepSeek | 25-08 | 671B | 37B | 0.055 | 61 | 7168 | 256 | 8 | 1 | 2048 | MLA | 128/kv-lora 512 | 129280 | sigmoid | ALF | D=1 | +840B | hybrid thinking + UE8M0 FP8 |
 | 59 | **DeepSeek-V3.2-Exp** | DeepSeek | 25-09 | 671B | 37B | 0.055 | 61 | 7168 | 256 | 8 | 1 | 2048 | **DSA (sparse attn over MLA)** | 128/kv-lora 512 | 129280 | sigmoid | ALF | D=1 | ? | sparse attention 实验 |
 | 60 | **Nemotron-3 Nano 30B-A3B** | NVIDIA | 25-12 | 31.6B | 3.2B | 0.10 | 29 hybrid | ? | 128 | 5–6 | 1 | ? | Hybrid Mamba-2+GQA | ? | ? | softmax | loss | – | ? | 1M ctx |
-| 61 | **Kimi K2** | Moonshot | 25 | 1T | 32B | 0.032 | 61 | 7168 | 384 | 8 | 1 | 2048 | MLA + **MuonClip** | 128/kv-lora 512 | 163840 | sigmoid | ALF | – | 15.5T | 1T 级首发；Muon 优化器 + post-QK-Clip |
+| 61 | **Kimi K2** | Moonshot | 25 | 1T | 32B | 0.032 | 61 | 7168 | 384 | 8 | 1 | 2048 | MLA + **MuonClip** | **64**/kv-lora 512 | 163840 | sigmoid | ALF | – | 15.5T | 1T 级首发；Muon 优化器 + post-QK-Clip |
 | 62 | **Ling-1T** | InclusionAI | 25-10 | 1T | ~50B | 0.05 | 80 | 8192 | 256 | 8 | 1 | 2048 | GQA + QK-norm | 64/8 | 157184 | sigmoid | ALF | D=1 | 20T+ | 最大 FP8 base 模型 |
 | 63 | **Ring-1T** | InclusionAI | 25-10 | 1T | ~50B | 0.05 | 80 | 8192 | 256 | 8 | 1 | 2048 | GQA + QK-norm | 64/8 | 157184 | sigmoid | ALF | D=1 | 20T+ | Ling-1T 上 RL（icepop） |
 | 64 | **Intern-S1-Pro** | Shanghai AI Lab | 26-02 | 1T | 22B | 0.022 | ? | ? | 512 | 8 | ? | ? | ? | ? | ? | ? | ? | ? | ? | 科学多模态 |
@@ -113,8 +113,8 @@
 |---|---|---|
 | **≥ 25%（半稠密）** | 9 | DBRX, Mixtral 系, Grok-1, Qwen2-57B, Jamba 1.5 Mini, WizardLM-2, AquilaMoE |
 | **15–25%（标准 MoE）** | 19 | DeepSeekMoE-16B, V2-Lite, Ling-mini-1.0, Phi-3.5, Hunyuan-Large, Llama 4 Scout, ERNIE 4.5 300B, Skywork, OLMoE, Moonlight, gpt-oss-20b, JetMoE, ... |
-| **8–15%（V3 主流）** | 24 | V3 全系, K2, Qwen3-30B/235B, Ling-flash, Ring-flash, GLM-4.5/4.6/Air, Step-3, dots1, Hunyuan-A13B, Nemotron-3 Nano, MiniMax-01/M1, Pangu Pro ... |
-| **< 8%（极稀疏）** | 14 | Ling-mini-2.0 (8.8%), GLaM (8%), Llama 4 Maverick (4.3%), gpt-oss-120b (4.4%), MiniMax-M2 (4.3%), Snowflake Arctic (3.5%), Qwen3-Next (3.8%), LongCat (4.8%), Ring/Ling-1T (5%), Intern-S1-Pro (2.2%) |
+| **8–15%（V3 主流）** | 24 | V3 全系 (5.5%→重分), **Ling-mini-2.0 (8.8%)**, Qwen3-30B/235B, Ling-flash (5.9%→重分), Ring-flash, GLM-4.5/4.6/Air (9%, 11.3%), Step-3, dots1 **(9.9%)**, Hunyuan-A13B, Nemotron-3 Nano, MiniMax-01/M1, Pangu Pro ... |
+| **< 8%（极稀疏）** | 14 | K2 (3.2%), GLaM (8%), Llama 4 Maverick (4.3%), gpt-oss-120b (4.4%), MiniMax-M2 (4.3%), Snowflake Arctic (3.5%), Qwen3-Next (3.8%), LongCat (4.8%), Ring/Ling-1T (5.1%), Ling-flash-2.0 (5.9%), Intern-S1-Pro (2.2%) |
 
 **关键趋势**：2025-H2 之后新模型几乎全部进入 < 10% 区间。"超稀疏 + 大量 expert" 是新主流。
 
@@ -122,12 +122,12 @@
 
 | Top-K | 个数 | 代表 |
 |---|---|---|
-| K=1 | 4 | **Llama 4 Scout / Maverick**, Switch Transformer, BlackMamba |
+| K=1 | 5 | **Llama 4 Scout / Maverick**, Switch Transformer, BlackMamba, **Hunyuan-Large** (K=1 routed + 1 shared) |
 | K=2 | 14 | Mixtral 全系, Snowflake Arctic, Phi-3.5, Yuan-M32, Jamba 全系, MiniMax-01/M1, Hunyuan-Turbo-S, OpenMoE, GLaM ... |
 | K=3 | 1 | Step-3 |
 | K=4 | 3 | DBRX, **gpt-oss 120b/20b**, Qwen1.5-MoE |
 | K=6 | 11 | DeepSeekMoE-16B, V2-Lite, V2-236B (K=6), Moonlight, ERNIE-21B-A3B, Aria, XVERSE, Ling-lite, mHC anchors, ... |
-| **K=8** | **24** | **V3/V3.1/V3.2, K2, Hunyuan-Large(1)/A13B, Ling 2.0 全系, GLM-4.5/4.6/Air, dots1, ERNIE 300B, Qwen3-30B/235B/Coder/VL, Qwen2-57B, Granite 3.x, gpt-oss(4 例外), Pangu Pro, MiniMax-M2, Nemotron-3 Nano, Intern-S1-Pro** |
+| **K=8** | **23** | **V3/V3.1/V3.2, K2, Hunyuan-A13B, Ling 2.0 全系, GLM-4.5/4.6/Air, dots1, ERNIE 300B, Qwen3-30B/235B/Coder/VL, Qwen2-57B, Granite 3.x, gpt-oss(4 例外), Pangu Pro, MiniMax-M2, Nemotron-3 Nano, Intern-S1-Pro** |
 | K=10 | 1 | Qwen3-Next-80B |
 | K=12 | 1 | LongCat-Flash |
 
