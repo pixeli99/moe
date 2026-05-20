@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MoE 概念交互学习</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --bg-soft: #1a1d24;
+    --bg-card: #1f232c;
+    --border: #2d323e;
+    --text: #e6e8eb;
+    --text-soft: #9aa3b2;
+    --accent: #7cc4ff;
+    --accent-2: #ffb86b;
+    --warn: #ff7b7b;
+    --ok: #7bd88f;
+    --tier-0: #5ec8ff;
+    --tier-1: #ffb86b;
+    --tier-2: #c084fc;
+    --tier-3: #7bd88f;
+    --tier-4: #f472b6;
+    --tier-5: #fbbf24;
+    --tier-6: #60a5fa;
+    --tier-7: #f87171;
+    --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  }
+  [data-theme="light"] {
+    --bg: #f7f8fa;
+    --bg-soft: #ffffff;
+    --bg-card: #ffffff;
+    --border: #e5e7eb;
+    --text: #1f2937;
+    --text-soft: #6b7280;
+    --accent: #0969da;
+    --accent-2: #c97a14;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; line-height: 1.65; }
+  header {
+    position: sticky; top: 0; z-index: 100;
+    background: var(--bg-soft);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  .header-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .title { font-weight: 700; font-size: 18px; color: var(--accent); white-space: nowrap; }
+  .subtitle { color: var(--text-soft); font-size: 13px; }
+  .search-box {
+    flex: 1; min-width: 220px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-size: 14px;
+  }
+  .search-box:focus { outline: 2px solid var(--accent); }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  button.ctl, .tier-chip {
+    background: var(--bg-card);
+    color: var(--text-soft);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  button.ctl:hover, .tier-chip:hover { color: var(--text); border-color: var(--accent); }
+  .tier-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.ctl.active { background: var(--accent-2); color: #000; border-color: var(--accent-2); }
+  .stats { color: var(--text-soft); font-size: 12px; margin-left: auto; font-family: var(--mono); }
+  .stats strong { color: var(--ok); font-size: 14px; }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+  .intro {
+    background: var(--bg-card);
+    border-left: 3px solid var(--accent);
+    padding: 14px 18px; border-radius: 6px;
+    margin-bottom: 24px;
+    color: var(--text-soft);
+    font-size: 14px;
+  }
+  .intro strong { color: var(--text); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--text-soft); margin-top: 8px; }
+  .legend-item { display: inline-flex; align-items: center; gap: 4px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  .concept {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left-width: 4px;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 14px;
+    transition: border-color 0.15s, transform 0.05s;
+  }
+  .concept:hover { border-color: var(--text-soft); }
+  .concept.mastered { opacity: 0.55; border-left-color: var(--ok) !important; }
+  .concept.hidden { display: none; }
+
+  .concept-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .concept-en { font-weight: 700; font-size: 17px; color: var(--text); }
+  .concept-zh { color: var(--text-soft); font-size: 14px; }
+  .tier-badge {
+    font-family: var(--mono);
+    font-size: 11px; padding: 2px 8px; border-radius: 4px;
+    background: var(--bg-soft); color: var(--text-soft); border: 1px solid var(--border);
+  }
+  .status-badge {
+    font-size: 11px; padding: 2px 6px; border-radius: 4px;
+    margin-left: auto; cursor: default;
+  }
+  .status-settled { background: rgba(123,216,143,0.15); color: var(--ok); }
+  .status-open { background: rgba(255,184,107,0.15); color: var(--accent-2); }
+  .status-niche { background: rgba(192,132,252,0.15); color: #c084fc; }
+
+  .gist { margin: 6px 0 10px; font-size: 15px; }
+  .why-toggle, .related-toggle, .dive-toggle {
+    background: transparent; border: none; color: var(--accent);
+    cursor: pointer; padding: 4px 0; font-size: 13px;
+    text-align: left;
+  }
+  .why-toggle:hover, .related-toggle:hover, .dive-toggle:hover { text-decoration: underline; }
+  .expandable { display: none; padding: 10px 12px; margin: 8px 0; border-left: 2px solid var(--accent); background: var(--bg-soft); border-radius: 0 4px 4px 0; font-size: 14px; }
+  .expandable.show { display: block; }
+  .expandable .label { font-weight: 600; color: var(--accent); display: block; margin-bottom: 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .related-chip {
+    display: inline-block; padding: 2px 8px; margin: 2px 3px 2px 0;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 999px; font-size: 12px; cursor: pointer;
+    color: var(--text-soft); transition: all 0.15s;
+  }
+  .related-chip:hover { color: var(--text); border-color: var(--accent); }
+
+  .controls-bottom { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); flex-wrap: wrap; }
+  .mastered-toggle { font-size: 13px; color: var(--text-soft); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+  .mastered-toggle input { cursor: pointer; }
+
+  /* Quiz mode */
+  body.quiz-mode .gist { display: none; }
+  body.quiz-mode .expandable.show { display: none; }
+  body.quiz-mode .quiz-prompt { display: block; }
+  body.quiz-mode .reveal-btn { display: inline-block; }
+  .quiz-prompt { display: none; font-style: italic; color: var(--text-soft); padding: 8px 0; }
+  .quiz-prompt::before { content: "💭 "; }
+  .reveal-btn {
+    display: none;
+    background: var(--accent-2); color: #000;
+    border: none; border-radius: 4px; padding: 6px 12px;
+    cursor: pointer; font-size: 13px; margin-top: 6px;
+  }
+  .reveal-btn:hover { opacity: 0.9; }
+  .concept.revealed .gist, .concept.revealed .expandable.show { display: block !important; }
+  .concept.revealed .reveal-btn { display: none; }
+
+  /* Tier divider */
+  .tier-divider {
+    margin: 28px 0 12px; padding-bottom: 6px;
+    border-bottom: 2px solid var(--border);
+    font-size: 14px; color: var(--text-soft); font-family: var(--mono);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .tier-divider .num { font-weight: 700; color: var(--text); }
+  .tier-divider.hidden { display: none; }
+
+  /* Diagrams */
+  .diagram {
+    margin: 14px 0; padding: 14px;
+    background: var(--bg-soft);
+    border: 1px solid var(--border); border-radius: 6px;
+    font-family: var(--mono); font-size: 13px; line-height: 1.55;
+    overflow-x: auto; white-space: pre;
+  }
+
+  /* Footer */
+  footer { margin-top: 60px; padding: 20px; text-align: center; color: var(--text-soft); font-size: 12px; border-top: 1px solid var(--border); }
+  footer a { color: var(--accent); }
+
+  /* Tier left borders */
+  .concept[data-tier="入门"] { border-left-color: var(--tier-0); }
+  .concept[data-tier="路由"] { border-left-color: var(--tier-1); }
+  .concept[data-tier="细粒度"] { border-left-color: var(--tier-2); }
+  .concept[data-tier="Attention"] { border-left-color: var(--tier-3); }
+  .concept[data-tier="稳定性"] { border-left-color: var(--tier-4); }
+  .concept[data-tier="训练辅助"] { border-left-color: var(--tier-5); }
+  .concept[data-tier="工程"] { border-left-color: var(--tier-6); }
+  .concept[data-tier="Scaling"] { border-left-color: var(--tier-7); }
+  .concept[data-tier="Upscale"] { border-left-color: #ec4899; }
+
+  /* TOC sidebar */
+  .toc {
+    position: fixed; left: 12px; top: 90px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px;
+    font-size: 12px; max-height: 70vh; overflow-y: auto;
+    min-width: 130px;
+  }
+  .toc a { display: block; color: var(--text-soft); text-decoration: none; padding: 3px 6px; border-radius: 4px; }
+  .toc a:hover { color: var(--text); background: var(--bg-soft); }
+  .toc-title { font-weight: 700; color: var(--accent); margin-bottom: 4px; font-family: var(--mono); }
+  @media (max-width: 1300px) { .toc { display: none; } }
+
+  /* Tag for keyword */
+  mark { background: rgba(255,200,80,0.35); color: inherit; padding: 0 2px; border-radius: 2px; }
+
+  details summary { cursor: pointer; }
+</style>
+</head>
+<body data-theme="dark">
+
+<header>
+  <div class="header-row">
+    <span class="title">📚 MoE 概念交互学习</span>
+    <input type="text" id="search" class="search-box" placeholder="🔍 输入概念名（中英文均可）: routing / 路由 / MLA / 共享专家 ...">
+    <div class="controls">
+      <button class="ctl" id="quizBtn" title="只显示提示问题，点击 Reveal 才展开答案">🎯 Quiz 模式</button>
+      <button class="ctl" id="masteredBtn" title="隐藏已掌握的">隐藏已掌握</button>
+      <button class="ctl" id="expandAllBtn">全展开</button>
+      <button class="ctl" id="collapseAllBtn">全收起</button>
+      <button class="ctl" id="themeBtn">☀️/🌙</button>
+      <button class="ctl" id="resetBtn" title="清除进度">↺ 重置</button>
+    </div>
+    <div class="stats">已掌握 <strong id="masteredCount">0</strong> / <span id="totalCount">0</span></div>
+  </div>
+  <div class="header-row" style="margin-top: 10px;">
+    <span class="subtitle">按 tier 过滤：</span>
+    <span class="tier-chip active" data-tier="all">全部</span>
+    <span class="tier-chip" data-tier="入门">入门</span>
+    <span class="tier-chip" data-tier="路由">路由与均衡</span>
+    <span class="tier-chip" data-tier="细粒度">细粒度 & MoE 结构</span>
+    <span class="tier-chip" data-tier="Attention">Attention 家族</span>
+    <span class="tier-chip" data-tier="稳定性">网络与稳定性</span>
+    <span class="tier-chip" data-tier="训练辅助">训练辅助</span>
+    <span class="tier-chip" data-tier="工程">工程并行</span>
+    <span class="tier-chip" data-tier="Scaling">Scaling 与方法论</span>
+    <span class="tier-chip" data-tier="Upscale">Upscale 路径</span>
+  </div>
+</header>
+
+<aside class="toc" id="toc">
+  <div class="toc-title">快速跳转</div>
+  <a href="#tier-入门">入门</a>
+  <a href="#tier-路由">路由与均衡</a>
+  <a href="#tier-细粒度">细粒度 & 结构</a>
+  <a href="#tier-Attention">Attention</a>
+  <a href="#tier-稳定性">稳定性</a>
+  <a href="#tier-训练辅助">训练辅助</a>
+  <a href="#tier-工程">工程并行</a>
+  <a href="#tier-Scaling">Scaling</a>
+</aside>
+
+<main>
+  <div class="intro">
+    <strong>怎么用：</strong>每个卡片有「一句话」「为什么这样设计」「关联概念」「深入阅读」四块。点击 <em>"为什么这样设计"</em> 展开因果链；点击 <em>关联概念</em> 跳转。点 <strong>🎯 Quiz 模式</strong> 切换成只看问题、自答后再揭示。所有进度保存在你的浏览器本地（localStorage）。
+    <div class="legend">
+      <span class="legend-item"><span class="legend-dot" style="background:var(--ok)"></span>✓ 业界共识</span>
+      <span class="legend-item"><span class="legend-dot" style="background:var(--accent-2)"></span>⚠ 仍有争议 / 你 A2 要验证</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#c084fc"></span>※ 小众 / 特殊创新</span>
+    </div>
+  </div>
+
+  <div id="conceptList"></div>
+
+  <footer>
+    回到 <a href="index.html">📖 论文笔记索引</a> · 共 31 篇深度笔记 · 本页 ~60 个概念全部基于 papers/01-31_*.md 抽取
+  </footer>
+</main>
+
+<script>
+const CONCEPTS = [
+  // ============ TIER 入门 ============
+  {
+    id: 'dense',
+    en: 'Dense Model',
+    zh: '稠密模型',
+    tier: '入门',
+    status: 'settled',
+    gist: '每个 token 经过模型时，所有参数都被用上的传统模型。100B 参数的 dense 模型，推理一次每 token 算 100B FLOPs。',
+    why: 'Transformer 原始设计。GPT-3、Llama 1/2/3、Mistral 7B、Qwen2.5 等都是 dense。MoE 是它的对立面。\n\n关键限制：参数量 ∝ 推理算力。想要更大模型 → 推理必然更贵。这就是 MoE 出现的根本动机。',
+    related: ['moe', 'active', 'sparsity'],
+    deep: '所有 dense LLM 论文（无需单独笔记）。'
+  },
+  {
+    id: 'moe',
+    en: 'MoE (Mixture of Experts)',
+    zh: '混合专家',
+    tier: '入门',
+    status: 'settled',
+    gist: '把 FFN 层换成"N 个并行 expert + 1 个 router"，每个 token 只经过 K 个 expert。参数变多但推理算力只与 K 个 expert 有关。',
+    why: '动机：dense 推理算力 ∝ 参数，太贵。\n\n核心 trick：把"参数容量"和"算力"解耦。\n• N 个 expert 提供大容量（总参数大）\n• Router 让每个 token 只激活 K 个 expert（推理算力小）\n\n类比：dense = 一个全能天才，MoE = 一群专家委员会，每次只叫 K 个相关的来。\n\n演化：1991 Jacobs → 2017 Google Sparsely-Gated → 2021 Switch → 2023 Mixtral 引爆开源 → 2024 DeepSeekMoE fine-grained 革命。',
+    related: ['dense', 'expert', 'router', 'topk', 'finegrained'],
+    deep: '01_deepseekmoe.md, 10_mixtral.md, 31_foundations.md §1'
+  },
+  {
+    id: 'expert',
+    en: 'Expert',
+    zh: '专家',
+    tier: '入门',
+    status: 'settled',
+    gist: '一个独立的 FFN（前馈层）。每层 MoE 有 N 个 expert，每个 token 只经过其中 K 个。一个 expert ≈ "缩小版的 dense FFN"。',
+    why: '为什么 expert 是 FFN 而不是 attention？因为 dense transformer 里 FFN 占 ~70% 参数，attention 占 ~25%。把参数最大头（FFN）做成 expert，节省最多。\n\nexpert 内部结构：通常是 SwiGLU `down(silu(up(x)) * gate(x))`，与 dense FFN 完全一致，只是 intermediate dim 更小。\n\n现代 MoE 一个 expert 大约 1000-3000 中间维度（vs dense FFN 14000+）。',
+    related: ['moe', 'router', 'finegrained', 'swiglu'],
+    deep: '01_deepseekmoe.md §3'
+  },
+  {
+    id: 'router',
+    en: 'Router (Gating Network)',
+    zh: '路由器 / 门控',
+    tier: '入门',
+    status: 'settled',
+    gist: '一个线性层（`x @ W_router`），给每个 token 算出 N 个 expert 的分数，再选 top-K 个。是 MoE 唯一的"调度大脑"。',
+    why: '为什么 router 这么微妙？因为它没有标签 —— 没有人告诉 router "这个 token 该送 expert 5 而不是 expert 7"。它只能通过下游 expert 的输出反向传播学习。\n\n这导致 MoE 训练有几个老大难：\n• Dead expert：某些 expert 一直没被选 → 永远学不到东西\n• 雪球效应：被选过的 expert 越训越好 → 越被选 → 其他 expert 饿死\n• Balance vs quality 矛盾：强制均衡会损害 quality\n\nMoE 设计 50% 难度都在 router。',
+    related: ['gate', 'topk', 'load-balance', 'dead-expert', 'aux-loss', 'alf'],
+    deep: '03_auxloss_free.md, 30_routing_implementation.md, 31_foundations.md §3'
+  },
+  {
+    id: 'gate',
+    en: 'Gate / Gating Function',
+    zh: '门控函数',
+    tier: '入门',
+    status: 'settled',
+    gist: 'Router 算完 logits 后用来转成"分数"的函数。两大派：sigmoid（per-expert 独立）或 softmax（cross-expert 竞争和为 1）。',
+    why: 'Softmax 派（Mixtral / OLMoE / Qwen3）：所有 expert 分数和=1，互相竞争。\nSigmoid 派（V3 / Ling / K2 / GLM-4.5）：每个 expert 独立 0-1，不互相竞争。\n\n为什么 sigmoid 派后来兴起？因为 sigmoid + ALF（bias balancing）配合更自然 —— bias 可以加到 sigmoid 分数上不破坏分布；加到 softmax 上会破坏 sum=1 性质。\n\n注意：FP32 计算！dots1 §2 强调 router 永远 FP32，BF16 会让 top-K 不稳。',
+    related: ['router', 'topk', 'alf', 'aux-loss', 'routed-scaling'],
+    deep: '30_routing_implementation.md §3-4'
+  },
+  {
+    id: 'topk',
+    en: 'Top-K Routing',
+    zh: 'Top-K 路由',
+    tier: '入门',
+    status: 'settled',
+    gist: '每个 token 选分数最高的 K 个 expert 走。K=1（Switch / Llama 4）极简但 quality 弱；K=2（Mixtral）2024 主流；K=6-8（V3 / Ling）2025 主流。',
+    why: 'K 是核心 trade-off：\n• K 越大 → expert 组合越平滑、quality 越高、FLOPs 越多\n• K=1 在 Switch 2021 验证过，但 quality 输给 K≥2\n• K=∞ 就变成 dense FFN 了\n\n2025+ 主流 K=8 + N=64-256，提供 C(64,8) ≈ 44 亿种 expert 组合空间，远胜 Mixtral C(8,2)=28 种。这是 fine-grained 革命的实质。',
+    related: ['router', 'moe', 'finegrained', 'expert'],
+    deep: '01_deepseekmoe.md §3.2, 17_finegrained_scaling.md'
+  },
+  {
+    id: 'active',
+    en: 'Active Params',
+    zh: '激活参数',
+    tier: '入门',
+    status: 'settled',
+    gist: '每个 token 实际经过的参数数。决定推理 FLOPs/token 和训练算力。MoE 模型公告里都会标"X B active"。',
+    why: 'Active = K 个 routed expert + shared expert + attention + norm + (按口径含) embedding/head。\n\n两套口径（评审时一定问清楚是哪个）：\n• 严格：只算 compute 路径上的（不含 embedding / LM head）\n• V3 风格：含 embedding 和 head，让数字更大\n\n你的 16B Profile B：严格 2.4B / V3 口径 2.9B。\n\n推理算力 ≈ 6 × active × tokens；训练算力 ≈ active × 4-6 × tokens（梯度路径更长）。',
+    related: ['total', 'sparsity', 'moe'],
+    deep: '22_FINAL_16B_design.md §2 参数核算表'
+  },
+  {
+    id: 'total',
+    en: 'Total Params',
+    zh: '总参数',
+    tier: '入门',
+    status: 'settled',
+    gist: '模型所有参数总和。决定知识容量、显存占用、模型大小。N 个 expert 都要驻留在显存里，所以 MoE 不省显存，只省算力。',
+    why: 'Active 决定"算多少"，Total 决定"装多少"。\n\nMoE 的便宜是算力便宜，**不是显存便宜**。N 个 expert 全部要常驻 GPU 显存。这一点很多人混淆。\n\n例：V3 是 671B total / 37B active —— 推理算力约等于 dense 37B，但显存占用 ≈ dense 671B（需要 8 张 H100 80GB 才装得下 BF16）。',
+    related: ['active', 'sparsity'],
+    deep: '04_deepseek_v3.md 配置表'
+  },
+  {
+    id: 'sparsity',
+    en: 'Sparsity / Activation Ratio',
+    zh: '稀疏度 / 激活率',
+    tier: '入门',
+    status: 'settled',
+    gist: 'Sparsity = Active / Total。现代 MoE 主流在 1/4（Mixtral，稠密）到 1/32（Qwen3-Next / Ling-mini 2.0，极稀疏）之间。',
+    why: '稀疏度趋势：2024 主流 1/4-1/8；2025-H2 后新模型几乎全部 < 1/10；最稀疏 1/32 (Qwen3-Next 80B/3B-active)。\n\n为什么越来越稀疏？\n• 训练算力相对固定 → 同 active 算力下，total 越大知识容量越大\n• 推理 latency 由 active 决定 → 稀疏意味着"低 latency + 大容量"双赢\n• 但 dropless + EP all-to-all 的工程复杂度也上去了\n\n你的 16B Profile B：sparsity = 1/6.5（中等）。极稀疏 Profile M 是 1/20。',
+    related: ['active', 'total', 'finegrained'],
+    deep: '28_open_source_moe_catalog.md §3.1'
+  },
+
+  {
+    id: 'ffn-attn-ratio',
+    en: 'FFN : Self-Attn Param Ratio',
+    zh: 'FFN 与注意力参数比',
+    tier: '入门',
+    status: 'settled',
+    gist: '经典 dense (MHA + 8/3 SwiGLU FFN) 比例是 2:1；GQA + 加宽 FFN 偏到 ~5:1；MoE active 7-10:1，total 50-100:1。',
+    why: '经典 dense transformer 一层：\n• MHA：4H²（Q+K+V+O 各 H²）\n• SwiGLU FFN (intermediate = 8H/3)：3H × 8H/3 = 8H²\n• 比值 2:1\n\n8H/3 不是巧合 — SwiGLU 三矩阵 vs GELU 两矩阵参数对齐的结果。\n\n现代偏离：\n• GQA → attn 缩到 ~2.5H²\n• Llama 3 / Qwen3 加宽 intermediate 到 3.5-5.4H\n• MoE → N 个 expert 把 FFN total 吹大 N×\n\nProfile B per layer：active FFN:Attn ≈ 7:1，total ≈ 50:1。Attention 在 active FLOPs 占比 ~12% (4K seq)；32K seq 时升到 ~40%（attention 加 seq 项）。\n\n实践含义：MoE 设计不要被 2:1 锁住，要看 active 路径上的比值。Long context 时 attention 占比显著上升。',
+    related: ['expert', 'swiglu', 'mha', 'gqa', 'sparsity'],
+    deep: '33_advanced_concepts.md §2'
+  },
+
+  // ============ TIER 路由与均衡 ============
+  {
+    id: 'shared',
+    en: 'Shared Expert',
+    zh: '共享专家',
+    tier: '路由',
+    status: 'open',
+    gist: '每个 token 永远经过的 expert（不参与 top-K 选择）。DeepSeek/Ling/Hunyuan/GLM 用 1-2 个；Mixtral/OLMoE/Qwen3-30B/gpt-oss 不用。',
+    why: '设计动机：很多 token-level 操作（语法、空格、词形变化）是所有 token 都需要的"通用功能"。让 shared expert 包办 → routed expert 可以专注真正"专家级"的特化知识。\n\n类比：shared = 大学必修课，routed = 选修课。\n\n国产派 vs 西方派分水岭：\n• 用 shared：DeepSeek/Ling/Qwen2-MoE/Hunyuan/Pangu/GLM 全用\n• 不用 shared：Mixtral/DBRX/OLMoE/Grok/gpt-oss\n\n**没有任何 paper 直接对比过** —— 这是 wind tunnel A2 T2.4 的核心问题之一。',
+    related: ['routed', 'router', 'expert', 'finegrained'],
+    deep: '01_deepseekmoe.md §3, 09_olmoe.md (0 shared 路线), 28_open_source_moe_catalog.md §3.3'
+  },
+  {
+    id: 'routed',
+    en: 'Routed Expert',
+    zh: '路由专家',
+    tier: '路由',
+    status: 'settled',
+    gist: '参与 top-K 选择的 expert。N_routed 是 expert 总数，每个 token 选 K 个走。N_routed=64 是甜区，128/256 是更细粒度选择。',
+    why: '与 shared expert 的对比：routed expert 是"按需调用"，shared expert 是"永远工作"。\n\nN_routed 选择：\n• N=8 (Mixtral)：粗粒度，已过时\n• N=64 (V2-Lite, DeepSeekMoE-16B, Moonlight)：甜区\n• N=128 (Qwen3-30B-A3B, GLM-4.5)：更细\n• N=256 (V3, Ling-mini-2.0)：fine-grained 极致；需要 dropless kernel 强支持\n• N=512 (Qwen3-Next, Intern-S1)：实验性',
+    related: ['shared', 'topk', 'finegrained'],
+    deep: '01_deepseekmoe.md, 17_finegrained_scaling.md'
+  },
+  {
+    id: 'load-balance',
+    en: 'Load Balance',
+    zh: '负载均衡',
+    tier: '路由',
+    status: 'settled',
+    gist: 'MoE 必须强制 router 把 token 比较均匀地分到 N 个 expert，否则雪球退化（dead experts）。两条解药：aux loss 或 ALF。',
+    why: '没有 balance 的后果：\n1. 浪费参数：训了几十亿参数，但只有 1/10 真正被用\n2. 训练不稳：被宠 expert 拿到的 batch 太大，loss 容易 spike\n3. 推理瓶颈：在 EP 下 token 集中流向几张卡 → 通信和计算被卡住\n\n监控指标：MaxVio = max(load) / min(load) − 1。V3 §4.2 报告 MaxVio_global < 0.1 是健康；> 1 就有 dead expert 风险。',
+    related: ['router', 'aux-loss', 'alf', 'dead-expert', 'maxvio'],
+    deep: '03_auxloss_free.md, 30_routing_implementation.md, 31_foundations.md §4'
+  },
+  {
+    id: 'aux-loss',
+    en: 'Aux Loss (Switch / Fedus 2021)',
+    zh: '辅助损失（aux loss）',
+    tier: '路由',
+    status: 'settled',
+    gist: '在主 loss 之外加 L_aux = α·N·Σ(f_i · P_i)，惩罚负载不均。Switch 2021 提出，Mixtral / OLMoE / Qwen3 / gpt-oss 全用。',
+    why: '机制：\n• f_i = expert i 实际拿到的 token 比例（detach 不进梯度）\n• P_i = router 对 expert i 的平均 softmax 概率（进梯度）\n• 这个 loss 给 W_router 加梯度，把 router 推向均衡\n\n问题：aux loss 同时塑造 router —— α 太大 → router 离 quality-optimal 太远；α 太小 → balance 失效。**Balance 和 quality 是耦合的**。\n\nα 标准值：0.01（Switch / Mixtral / OLMoE 共识）。\n\n2024-08 后，V3 派改用 ALF 解决了这个耦合问题。',
+    related: ['alf', 'load-balance', 'router'],
+    deep: '10_mixtral.md, 30_routing_implementation.md §4'
+  },
+  {
+    id: 'alf',
+    en: 'ALF (Aux-Loss-Free)',
+    zh: '无辅助损失（V3 派）',
+    tier: '路由',
+    status: 'settled',
+    gist: '加一个 bias 作为独立 controller：负载多的 expert 减 bias，少的加 bias。Bias 不进梯度。Router 的 W 只受 quality loss 影响。',
+    why: '2024-08 Wang et al. (arXiv 2408.15664) 提出，2024-12 V3 在 14.8T tokens 大规模验证。后续 K2 / Moonlight / Ling 2.0 / GLM-4.5 / dots1 全跟进。\n\n精妙之处：bias 只影响"谁被选"（加在 logits 上做 top-K），不影响"被选后给多大权重"（权重用 raw gate）。**Balance 和 quality 完全解耦**。\n\n更新规则（每 step backward 后）：\n`bias[i] -= γ · sign(load[i] − 1/N)`，γ = 0.001。\n\nLing 2.0 变种：零均值修正，强制 mean(bias) = 0 防漂移。但 dots1 在 11.2T 上不用这个修正也跑通 —— Ling 修正是 nice-to-have 不是 must。\n\n类比：aux loss = 一边让员工干活一边打他"你也要负责均衡"；ALF = 设独立 HR 看谁忙就少派单，员工只管干活。',
+    related: ['aux-loss', 'router', 'load-balance', 'sigmoid'],
+    deep: '03_auxloss_free.md, 04_deepseek_v3.md §4.2'
+  },
+  {
+    id: 'dead-expert',
+    en: 'Dead Expert',
+    zh: '死专家',
+    tier: '路由',
+    status: 'settled',
+    gist: '某个 expert 长期拿不到 token（< 1% batch），等于没训。雪球退化的产物，必须避免。',
+    why: '雪球机制：随机初始化的 router → 偶然某些 expert 被多选 → 它们越训越好 → 越被选 → 其他 expert 没机会学 → 永远不会被选\n\n监控：每 5B token 检查 active_experts 数（拿到 ≥ 1% token 的 expert 数），应 ≥ N × 0.9。\n\n防止：加 aux loss 或 ALF（load balance 机制）。最严重情况下还可手动重置 dead expert 权重（实践中很少需要）。',
+    related: ['router', 'load-balance', 'aux-loss', 'alf', 'maxvio'],
+    deep: '31_foundations.md §3'
+  },
+  {
+    id: 'maxvio',
+    en: 'MaxVio',
+    zh: '最大负载偏差',
+    tier: '路由',
+    status: 'settled',
+    gist: 'MaxVio = max(expert_load) / min(expert_load) − 1。Balance 健康度的 1 号监控指标。V3 报告 < 0.1 是正常。',
+    why: '为什么 max/min 而不是 std？因为 min(load) ≈ 0 是 dead expert 的标志，max/min 这个比值对 dead expert 极敏感。\n\nMaxVio_local = 当前 DP rank 上的；MaxVio_global = 所有 DP rank all-reduce 后的。\n\n阈值经验：\n• < 0.1：很健康\n• 0.1-0.5：可接受\n• > 1：dead expert 出现，必须干预\n• > 5：严重失衡，模型质量受损\n\nALF 比 aux loss 在 MaxVio 上通常更好（V3 §4.2 实验）。',
+    related: ['load-balance', 'alf', 'dead-expert'],
+    deep: '04_deepseek_v3.md §4.2'
+  },
+  {
+    id: 'routed-scaling',
+    en: 'Routed Scaling Factor',
+    zh: '路由缩放因子',
+    tier: '路由',
+    status: 'settled',
+    gist: 'sigmoid+ALF 派的 top-K weight 重归一后乘的常数（V3=2.5, LongCat=6.0）。补偿 sigmoid 输出尺度。',
+    why: 'Sigmoid 输出 [0,1] 平均 ~0.5，top-K=8 求和约 ~4；softmax topK 求和约 ~0.9。Expert 输出与 dense FFN 输出尺度需要匹配，否则下游 layer 输入分布漂移。\n\nV3 / dots1 / GLM-4.5 / Ling 都用 2.5；LongCat-Flash 用 6.0 是因为它有 256 个 zero-experts（identity 旁路），有效 top-K 路径数更多。\n\nSoftmax 派不需要这个因子（softmax 自带归一）。',
+    related: ['gate', 'alf', 'finegrained'],
+    deep: '04_deepseek_v3.md, 30_routing_implementation.md §3.2'
+  },
+
+  // ============ TIER 细粒度 & MoE 结构 ============
+  {
+    id: 'finegrained',
+    en: 'Fine-grained MoE',
+    zh: '细粒度 MoE',
+    tier: '细粒度',
+    status: 'settled',
+    gist: '把 expert 数量加多、每个 expert 变小（vs Mixtral 8 大 expert）。DeepSeekMoE 2024-01 引发的革命，现在 N=64-256 是主流。',
+    why: '对比 Mixtral 8 vs DeepSeekMoE 64：\n• Mixtral: N=8 大 expert (FFN dim=14336), K=2，组合空间 C(8,2)=28\n• DeepSeekMoE: N=64 小 expert (FFN dim=1408), K=6，组合空间 C(64,6)=7400万\n\n总 FFN 参数差不多，但组合空间天差地别 → 模型可以学到更精细的功能分工。\n\n实证：同 active 下 loss 改善 ~0.02-0.05；Krajewski 2024 scaling law 论文给出 fine-grained > coarse 的理论基础。\n\n上限：N=256 时 EP all-to-all 通信开销大；N=512 (Qwen3-Next) 是实验性。N=64-128 是 2025+ 甜区。',
+    related: ['expert', 'topk', 'routed', 'sparsity'],
+    deep: '01_deepseekmoe.md, 17_finegrained_scaling.md, 31_foundations.md §5'
+  },
+  {
+    id: 'first-k-dense',
+    en: 'First-K Dense Layer',
+    zh: '前 K 层 Dense FFN',
+    tier: '细粒度',
+    status: 'settled',
+    gist: '把模型最前面几层（通常 1 层）的 FFN 保留为标准 dense，后面才换成 MoE。V2-Lite / DeepSeekMoE / GLM-4.5-Air / ERNIE 4.5 共识。',
+    why: '动机：模型最前几层处理的是"低层特征"（subword 级别、标点、空格），这些不需要 expert 特化，让 dense FFN 处理更稳定。\n\n好处：\n• 训练稳定性显著提升\n• 与 embedding 之间的 gradient flow 不被 router 干扰\n• 推理时第一层不需要 EP all-to-all（小优化）\n\n第几层够：通常 1 层（V2-Lite）；ERNIE 4.5 21B 用 2 层；OLMoE 用 0 层（完全 MoE，需要更多其他稳定性补偿）。',
+    related: ['moe', 'expert'],
+    deep: '22_FINAL_16B_design.md §2'
+  },
+
+  // ============ TIER Attention 家族 ============
+  {
+    id: 'kvcache',
+    en: 'KV Cache',
+    zh: 'KV 缓存',
+    tier: 'Attention',
+    status: 'settled',
+    gist: '推理生成第 t 个 token 时，要看前面所有 token 的 K 和 V。把这些 K, V 存下来叫 KV cache。是长 context 推理的主要显存吃手。',
+    why: '为什么 attention 设计的所有变种（GQA/MLA/MQA/Sliding/Linear）都在卷 KV cache？\n\n例：Llama 2 70B 在 32K context 下 KV cache ≈ 20 GB；H100 80GB 装不下大 batch。\n\nKV cache 大小 = 2 × num_layers × num_kv_heads × head_dim × seq_len × precision\n\n减少 KV cache 的策略：\n1. 减 head 数：MHA → MQA (1 KV head) → GQA (~4-8 KV heads)\n2. 投影到低秩 latent：MLA（DeepSeek 发明）\n3. 用线性 attention 完全消除：Mamba/Lightning/DeltaNet\n4. Sliding window：只看最近 N 个 token (gpt-oss 等)',
+    related: ['mha', 'gqa', 'mla', 'hybrid-attn'],
+    deep: '02_deepseek_v2.md §3'
+  },
+  {
+    id: 'mha',
+    en: 'MHA (Multi-Head Attention)',
+    zh: '多头注意力',
+    tier: 'Attention',
+    status: 'settled',
+    gist: '原版 transformer attention。每个 head 独立的 Q, K, V，一共 H 套。简单稳定，KV cache 大。Grok-1 / DeepSeekMoE-16B / Moonlight / dots1 还在用。',
+    why: 'GPT 1/2/3 都用 MHA。优点：实现最简单、quality 最稳；缺点：KV cache = 2 × H × head_dim × seq_len，吃显存。\n\n2023 后大多换成 GQA，但 dots1 和 Moonlight 这种 16B 级 MoE 还保留 MHA + QK-Norm —— 因为他们觉得 16B 规模 KV cache 不是瓶颈，MHA 的 quality 优势仍值得。',
+    related: ['gqa', 'mqa', 'mla', 'kvcache'],
+    deep: '24_dots1.md'
+  },
+  {
+    id: 'gqa',
+    en: 'GQA (Grouped Query Attention)',
+    zh: '分组查询注意力',
+    tier: 'Attention',
+    status: 'settled',
+    gist: 'Q heads 多 (e.g. 32)，K/V heads 少 (e.g. 4)。每 8 个 Q heads 共享一组 K/V → KV cache 缩到 1/8。Llama 2 起 dense LLM 主流，现代 MoE 也大多用。',
+    why: 'MHA 与 MQA（只 1 个 KV head）之间的折中。\n\n质量 vs 缓存 trade-off：\n• MHA：quality 最好，KV cache 最大\n• GQA 4-8 KV heads：quality 略降 (~-0.1pt MMLU)，KV cache 减少 4-8×\n• MQA 1 KV head：quality 显著降，KV cache 最小\n\nGQA 几乎是免费午餐，已成业界默认。你的 16B Profile B: 16 Q heads / 4 KV heads。',
+    related: ['mha', 'mqa', 'mla', 'kvcache'],
+    deep: '05_qwen3.md §2'
+  },
+  {
+    id: 'mqa',
+    en: 'MQA (Multi-Query Attention)',
+    zh: '多查询注意力',
+    tier: 'Attention',
+    status: 'settled',
+    gist: 'GQA 的极端：所有 Q heads 共享 1 个 KV head。KV cache 最小但 quality 损失最大。PaLM 2 / Falcon 7B 用过；现在很少用。',
+    why: '直觉：用 1 个 KV head 几乎一定丢东西。GQA 的 4-8 KV heads 是更好的甜点。\n\n现代 LLM 几乎全转向 GQA 或更精巧的 MLA。MQA 在 2024 后已退场。',
+    related: ['mha', 'gqa', 'mla'],
+    deep: '（无单独笔记，业界已淘汰）'
+  },
+  {
+    id: 'mla',
+    en: 'MLA (Multi-head Latent Attention)',
+    zh: '多头潜在注意力',
+    tier: 'Attention',
+    status: 'niche',
+    gist: 'DeepSeek 发明（2024-05 V2）。K, V 先投影到低维 latent (~512 维)，再展开。KV cache 比 GQA 还小 5-10×。仅 DeepSeek 系（V2/V3/V3.1/V3.2/K2/LongCat/mHC）使用。',
+    why: '动机：V3 等 671B 级模型需要 long context (128K)，GQA 的 KV cache 还是太大。\n\n机制：\n1. K, V 不直接存，存它们的低维 latent 表示 c_kv\n2. 推理时按需从 c_kv 重新 unfold 出 K, V\n3. 同时 K 还引入"分离 rope"，把位置信息和内容信息解耦\n\n优点：KV cache 极小，128K context 可行；与 dense FP8 训练兼容性好\n\n缺点：实现复杂、kernel 不容易优化、训练 ops 难度高；非 DeepSeek 团队复现困难\n\n16B 不用 MLA 的原因：16B 在 32K context 下 GQA 已经够用了，KV cache 不是瓶颈，引入 MLA ROI 低。',
+    related: ['mha', 'gqa', 'kvcache', 'long-context'],
+    deep: '02_deepseek_v2.md §3'
+  },
+  {
+    id: 'hybrid-attn',
+    en: 'Hybrid Attention (Mamba / Lightning / DeltaNet)',
+    zh: '混合注意力',
+    tier: 'Attention',
+    status: 'niche',
+    gist: '大部分层用线性 / SSM / RNN-like 注意力（O(N) memory），少数关键层保留 softmax。Jamba、MiniMax-01、Granite 4、Qwen3-Next、Hunyuan-Turbo-S 用。',
+    why: '为什么需要：softmax attention 是 O(N²) memory，N=1M context 时显存爆炸。\n\nSSM (Mamba) / Lightning Attention / DeltaNet 都是 O(N) memory 替代品，但 retrieval 精度差。\n\n混合策略：1-2 层 softmax（保 retrieval）+ 多层 Mamba（保长度）。Jamba 用 1:7 attn:mamba，Qwen3-Next 用 1:3 attn:DeltaNet。\n\n注意：MiniMax-M2 (2025-10) 反向 —— 放弃 Lightning 回到 full softmax。说明 hybrid 还在探索中，不是公认胜利。\n\n16B 一般不上 hybrid，因为：\n1. 标准 context ≤ 128K，softmax 还撑得住\n2. 工程复杂度 + kernel 适配负担',
+    related: ['mha', 'gqa', 'long-context'],
+    deep: '15_jamba.md, 13_minimax_01.md, 28_open_source_moe_catalog.md §3.5'
+  },
+  {
+    id: 'rope',
+    en: 'RoPE (Rotary Positional Embedding)',
+    zh: '旋转位置编码',
+    tier: 'Attention',
+    status: 'settled',
+    gist: '把 token 位置编码做成"对 Q, K 向量做旋转变换"，旋转角度与位置成比例。Llama / Qwen / DeepSeek 全用。',
+    why: 'RoPE 的好处：可外推。训练时只见过 4K context，推理时通过 YaRN 等技术可以扩到 128K-1M。\n\nRoPE base 参数（θ_base）：\n• 1e4：原始（短 context）\n• 5e4：Kimi K2\n• 6e5：Ling-mini\n• 1e6：Qwen3-30B-A3B（128K 友好）\n• 1e7：Qwen3-235B / Llama 4 Maverick（1M+ 友好）\n\n更大的 base → 更平缓的频率衰减 → 长 context 更稳。但短 context quality 略降。',
+    related: ['yarn', 'mla', 'long-context'],
+    deep: '05_qwen3.md, 22_FINAL_16B_design.md §2'
+  },
+  {
+    id: 'yarn',
+    en: 'YaRN (Yet another RoPE extensioN)',
+    zh: 'YaRN 长度外推',
+    tier: 'Attention',
+    status: 'settled',
+    gist: '后训练阶段对 RoPE 频率做调整，让模型支持比训练时更长的 context。Qwen / Llama 4 / GLM 等的 long-context 都用。',
+    why: '动机：完整训练 128K context 太贵；YaRN 让你 4K-32K 预训练 + 短期 fine-tune 扩到 128K-1M。\n\n机制：把 RoPE 不同频率分量分开处理——高频压缩、低频不动——配合短期 mid-training。\n\n你的 16B：4K 预训练 → 32K mid-training → 128K YaRN，是 V3/K2/Ling 同款课程。',
+    related: ['rope', 'long-context', 'mid-training'],
+    deep: '22_FINAL_16B_design.md §2'
+  },
+  {
+    id: 'long-context',
+    en: 'Long Context',
+    zh: '长上下文',
+    tier: 'Attention',
+    status: 'settled',
+    gist: '让模型支持 128K-10M 输入 token。靠 MLA / hybrid attn / sliding window / YaRN 组合实现。Llama 4 Scout = 10M。',
+    why: '为什么 long context 重要：agentic 任务、code 仓库分析、文档对话。1M context 是 2025 主流目标。\n\n挑战 3 件：\n1. KV cache 显存（MLA / hybrid 解）\n2. 训练 sample 不够长（YaRN 解）\n3. 长依赖 quality 下降（位置编码设计 + needle-in-haystack 监控）\n\n你的 16B：目标 128K，标准方案足够。',
+    related: ['mla', 'hybrid-attn', 'rope', 'yarn'],
+    deep: '08_ling_2.md (long context curriculum)'
+  },
+
+  {
+    id: 'head-dim',
+    en: 'Head Dimension',
+    zh: '注意力头维度',
+    tier: 'Attention',
+    status: 'settled',
+    gist: '每个 attention head 的维度。128 是硬件甜区（FlashAttention 最优）；64 / 256 是少数特例。head_dim × num_heads = hidden。',
+    why: 'FlashAttention v2/v3 只为 head_dim ∈ {64, 128, 256} 优化，其他值走 fallback 慢 10×。\n\n• 64 (gpt-oss)：小 head 但多，attention 更密集；CUDA register 友好\n• **128**：行业默认（Llama / Qwen / DeepSeek 全用），tensor core 原生 MMA，质量好\n• 192 (Qwen3-Coder)：中庸\n• 256 (Qwen3-Next, MFA)：大 head 但少；适合超稀疏 MoE 节省 attn 算力\n\n约束：head_dim × num_q_heads = hidden；多 head 共享 KV (GQA) 时 head_dim 仍统一。\n\nProfile B 用 head_dim=128 是默认安全选择，不消融。',
+    related: ['mha', 'gqa', 'mla', 'kvcache', 'hidden-alignment', 'flash-attention'],
+    deep: '33_advanced_concepts.md §3.1'
+  },
+  {
+    id: 'linear-attn',
+    en: 'Linear Attention',
+    zh: '线性注意力',
+    tier: 'Attention',
+    status: 'niche',
+    gist: '把 softmax(QK^T) 换成 φ(Q) × φ(K)^T × V，O(N²) → O(N) memory + compute。Retrieval 精度差，必须与 softmax 混合。',
+    why: '动机：softmax attention 是 O(N²) memory + compute，N=1M 时显存爆炸。\n\nLinear 方案：用 kernel 函数 φ 近似 softmax，让计算可以"先 K^T·V 再 Q@"，从 O(N²) → O(N)。\n\n代表：Mamba / SSM (Gu 2023), Lightning Attention (MiniMax), DeltaNet (Yang), RWKV。\n\n核心限制：retrieval / 精确召回弱（缺 softmax 的选择性聚焦）。**永远与少量 softmax 层混合使用**：Jamba 7:1, Qwen3-Next 3:1。\n\n趋势观察：MiniMax-M2 (2025-10) 反向放弃 Lightning 回到 full softmax，说明 hybrid 还在探索。\n\n你的 16B 128K context 内 softmax 还够用，不引入 linear。',
+    related: ['sparse-attn', 'hybrid-attn', 'kvcache', 'long-context'],
+    deep: '33_advanced_concepts.md §5.1, 15_jamba.md, 13_minimax_01.md'
+  },
+  {
+    id: 'sparse-attn',
+    en: 'Sparse Attention',
+    zh: '稀疏注意力',
+    tier: 'Attention',
+    status: 'open',
+    gist: '保留 softmax 但只对部分位置算 attention。Sliding window / Block-sparse / Top-K / DSA。Retrieval 精度好，O(N×K)。',
+    why: '与 linear attention 区别：linear 替换 softmax → retrieval 差；sparse 保留 softmax 但选位置算 → retrieval 好。两个不是一回事，常被混淆。\n\n方法：\n• **Sliding window** (Mistral, gpt-oss)：每 token 只看最近 W=2048\n• **Block-sparse** (Longformer, BigBird)：固定 block + global tokens\n• **Top-K dynamic** (MoBA, NSA)：每 query 选 top-K 相关\n• **DSA** (DeepSeek V3.2)：Lightning indexer 选 top-K + selected attention\n\n复杂度：O(N × K)，K 远小于 N。1M context 下 K=256，省 4000×。\n\n你的 16B 128K context 不需要 sparse；100B+ 上扩到 1M 时再考虑。',
+    related: ['linear-attn', 'hybrid-attn', 'dsa-deepseek', 'long-context'],
+    deep: '33_advanced_concepts.md §5.2, §8'
+  },
+  {
+    id: 'dsa-deepseek',
+    en: 'DSA (DeepSeek Sparse Attention)',
+    zh: 'DeepSeek 稀疏注意力',
+    tier: 'Attention',
+    status: 'niche',
+    gist: 'DeepSeek-V3.2-Exp (2025-09) 的 sparse attention：Lightning Indexer 选 top-K + 在 MLA 上做 selected attention。1M+ context 关键技术。',
+    why: '机制：\n1. **Lightning Indexer**（轻量 attention 模块）扫所有 token，每 query 找出 top-K=256 相关 key\n2. **Selected Attention** 只对这 K 个 key 做正经 MLA\n3. Cache 仍是 MLA 的低秩 latent\n\n相比纯 MLA 提升：attention compute 从 O(N²) 降到 O(N × K)，1M context 可行（V3 不可行）。\n\n开源状态：\n• ✓ V3.2-Exp weights 已开源 (HF: deepseek-ai/DeepSeek-V3.2-Exp)\n• ✗ Lightning Indexer 训练 recipe 不完整\n• ✗ TileLang kernel 未开源\n\n社区复现刚起步。**你的 16B 不引入**，等 MLA 稳定 + context 拉到 1M 时再考虑。',
+    related: ['mla', 'sparse-attn', 'long-context'],
+    deep: '33_advanced_concepts.md §8'
+  },
+
+  // ============ TIER 网络与稳定性 ============
+  {
+    id: 'rmsnorm',
+    en: 'RMSNorm',
+    zh: 'RMS 归一化',
+    tier: '稳定性',
+    status: 'settled',
+    gist: 'LayerNorm 的简化版（去掉 mean 减法，只 rescale）。计算更快、quality 一样、所有现代 LLM 默认。',
+    why: 'LayerNorm: y = γ · (x − μ)/σ + β\nRMSNorm: y = γ · x / √(mean(x²))\n\n论文 (Zhang & Sennrich 2019) 显示 RMSNorm 与 LayerNorm quality 持平，但快 ~7%。Llama 起所有现代 LLM 用 RMSNorm。\n\n你不需要特别决策这个 —— 默认就是 RMSNorm。',
+    related: ['qknorm', 'pre-norm'],
+    deep: '（业界默认，无需单独笔记）'
+  },
+  {
+    id: 'swiglu',
+    en: 'SwiGLU',
+    zh: 'SwiGLU 激活',
+    tier: '稳定性',
+    status: 'settled',
+    gist: 'FFN 激活函数：`down(silu(up(x)) * gate(x))`。比 ReLU/GELU 略好。所有现代 LLM 用，包括所有 MoE。',
+    why: 'Shazeer 2020 引入。门控机制让模型可以学习"用哪些通道"，类似一个微型 attention。\n\nFFN 参数从 2 × dim × intermediate（ReLU/GELU）变成 3 × dim × intermediate（多一个 gate proj）。参数 +50% 但 quality 提升明显。\n\n你不需要特别决策这个 —— SwiGLU 是 expert 内部的默认结构。',
+    related: ['expert'],
+    deep: '（业界默认）'
+  },
+  {
+    id: 'qknorm',
+    en: 'QK-Norm',
+    zh: 'QK 归一化',
+    tier: '稳定性',
+    status: 'settled',
+    gist: '在 attention 的 Q 和 K 上各加一个 RMSNorm，防止 attention logits 爆炸。OLMoE / Qwen3 / Hunyuan-A13B / dots1 / Ling 2.0 默认。',
+    why: '问题：训练久了 Q, K 的 norm 一路涨 → Q·K 点积巨大 → softmax 饱和 → 单个 token 接管 attention，模型崩。\n\n解药：在 Q proj 和 K proj 后各加 `q = RMSNorm(q)`、`k = RMSNorm(k)`。把 Q, K 的尺度约束住。\n\n几乎所有 2024+ 现代 MoE 都加。你的 16B Profile B 默认开。\n\nK2 用 MuonClip（post-update QK clip）替代 QK-Norm，效果类似但实现路径不同。',
+    related: ['rmsnorm', 'router-zloss', 'muonclip', 'gradient-spike'],
+    deep: '09_olmoe.md §4.1.7, 24_dots1.md §2'
+  },
+  {
+    id: 'router-zloss',
+    en: 'Router Z-Loss',
+    zh: '路由器 z-loss',
+    tier: '稳定性',
+    status: 'settled',
+    gist: 'L_z = β · mean(logsumexp(router_logits)²)，β=0.001。防 router logits magnitude 爆炸。所有现代 MoE 默认开。',
+    why: '问题：router 的 W 没有约束，训久了输出 logits 取值 ±50+ → sigmoid/softmax 饱和 → top-K 选择不稳定。\n\nZ-loss 直接惩罚 logits 的 magnitude（不是范数）：让所有 logits 围绕 0 保持小数值。\n\nOLMoE §4.1.7 推荐 β=0.001。所有现代 MoE 一律加（V3, Ling, K2, dots1, Mixtral, Qwen3）。\n\n不要消融这个 —— 是免费午餐。',
+    related: ['router', 'gate', 'qknorm'],
+    deep: '09_olmoe.md §4.1.7'
+  },
+  {
+    id: 'pre-norm',
+    en: 'Pre-Norm vs Post-Norm',
+    zh: 'Pre-Norm vs Post-Norm',
+    tier: '稳定性',
+    status: 'settled',
+    gist: 'Pre-norm: `x + f(Norm(x))`。Post-norm: `Norm(x + f(x))`。Pre-norm 训练稳定，所有现代 LLM 默认。',
+    why: '原始 transformer（2017）用 post-norm，但深 layer 时梯度难传。GPT-2 起改 pre-norm，大模型时代统一为 pre-norm。\n\n你不需要单独决策 —— pre-norm + RMSNorm + QK-Norm 是 2024+ 标准三件套。',
+    related: ['rmsnorm', 'qknorm'],
+    deep: '（业界默认）'
+  },
+  {
+    id: 'gradient-spike',
+    en: 'Gradient Spike / Loss Surge',
+    zh: '梯度爆炸 / Loss 突起',
+    tier: '稳定性',
+    status: 'settled',
+    gist: '训练中突然 loss 上跳 100×、grad norm 上跳 10×。MoE 特有的"病"，由 router 不稳、QK 爆炸、bias 漂移引起。',
+    why: '常见原因：\n1. Router 选择翻车（某些 expert 突然垄断）\n2. QK 爆炸（attention 单 token 接管）\n3. Warmup 结束 LR 跳 peak\n4. ALF bias 漂太远\n5. FP8 数值不稳\n\n监控：grad_norm 时序、loss 时序、grad_clip 触发率（grad clip 触发率 > 5% 是预警）。\n\n解药四件套：QK-Norm + Router z-loss + FP32 gating + WSM scheduler。任一去掉显著增 spike 风险（OLMoE 多次验证）。\n\n极端情况下 mHC (Manifold-Constrained Hyper-Connections) 是 DeepSeek 在 27B 上对付 12k step loss surge 的方案。',
+    related: ['qknorm', 'router-zloss', 'wsm', 'hc-mhc'],
+    deep: '27_mhc.md, 09_olmoe.md'
+  },
+
+  // ============ TIER 训练辅助 ============
+  {
+    id: 'mtp',
+    en: 'MTP (Multi-Token Prediction)',
+    zh: '多 token 预测',
+    tier: '训练辅助',
+    status: 'open',
+    gist: '让模型每个位置不只预测下一个 token，预测后 D 个。V3 风格 D=1（chain）；Gloeckle 风格 D=4（parallel heads）。',
+    why: '动机：\n1. 更密的训练信号——每位置学多个 token 距离，提升长依赖建模\n2. 推理可加速——self-speculative decoding 可一次输出多个候选 token\n3. 零部署成本——丢弃 MTP head，主 LM head 与不带 MTP 训出的模型一样用\n\n谁用：V3 / V3.1 / V3.2, GLM-4.5/4.6, Ling-mini/flash/1T, Ring 全系, Qwen3-Next, MiniMax-M2 (D=3!)\n\n谁不用：Mixtral, OLMoE, Qwen3-30B/235B, Llama 4, gpt-oss, Phi-3.5, Hunyuan-Large\n\n训练代价：+5-10%（额外一个 transformer block）。\n\n你的 16B：2.4B active 是 boundary case（Gloeckle 数据 ≤1.3B 拖累 / ≥6.7B 显效）。**wind tunnel A2 T3.1 验证后再决定**。',
+    related: ['speculative', 'ssd'],
+    deep: '20_mtp_gloeckle.md, 23_mtp_investigation.md'
+  },
+  {
+    id: 'speculative',
+    en: 'Speculative Decoding',
+    zh: '推测解码',
+    tier: '训练辅助',
+    status: 'settled',
+    gist: '推理时用小模型快速生成 N 个 token 候选，让大模型一次验证。如果都对就接受 → 速度 ×N。',
+    why: '生成是 sequential 的瓶颈：每生成 1 token 要 forward 1 次。Speculative 把"小模型猜 + 大模型校"并行化。\n\nMTP 提供了一种特殊形式："self-speculative" —— 大模型自己的 MTP heads 给候选，主 head 验证。V3 报告 1.8× 推理加速。\n\n不需要 MTP 也可以做 spec decoding，用单独的 draft model。但 MTP 是免费午餐 —— 已经训过的 head 直接复用。',
+    related: ['mtp', 'ssd'],
+    deep: '20_mtp_gloeckle.md'
+  },
+  {
+    id: 'ssd',
+    en: 'Self-Speculative Decoding',
+    zh: '自推测解码',
+    tier: '训练辅助',
+    status: 'settled',
+    gist: 'Speculative 的特例：用模型自己的 MTP heads 作 drafter，不需要额外小模型。V3 用，推理 1.8×。',
+    why: '与普通 spec decoding 的区别：drafter 与 main model 共享 backbone，只是末端 head 不同。\n• 不需要额外 GPU 装小模型\n• drafter 与 main 高度对齐，accept rate 高\n• 推理路径上零成本（MTP heads 已经在模型里）\n\n是 MTP 的主要"商业理由"：训练成本 +5-10% 换推理 latency -45%。',
+    related: ['mtp', 'speculative'],
+    deep: '20_mtp_gloeckle.md, 04_deepseek_v3.md'
+  },
+  {
+    id: 'upcycling',
+    en: 'Sparse Upcycling',
+    zh: '稀疏上回收',
+    tier: '训练辅助',
+    status: 'settled',
+    gist: '从已有 dense checkpoint 出发，"拆分"它的 FFN 成 N 个 expert，再 continual pretrain 成 MoE。AquilaMoE / Qwen1.5-MoE / WizardLM-2 8x22B 用过。',
+    why: '动机：训 from-scratch 太贵。如果已经有强 dense checkpoint，能不能直接转换？\n\n机制：复制 dense FFN N 次成 N 个 expert，加上 router 初始随机，然后继续训。\n\nOLMoE / Skywork 实验：训练预算 ≥ 1.2× dense from-scratch 时，from-scratch 反超。\n\n所以 upcycling 是：\n• 短 budget 的强方案（< 1T tokens 继续训）\n• 长 budget 不如 from-scratch\n\n你的 16B 训 15T tokens，远超 1.2× 阈值，**不用 upcycling**。',
+    related: ['continual'],
+    deep: '19_sparse_upcycling.md'
+  },
+  {
+    id: 'mid-training',
+    en: 'Mid-Training',
+    zh: '中段训练',
+    tier: '训练辅助',
+    status: 'settled',
+    gist: '主 pretraining 结束后、SFT 之前的一个阶段。换更高质量数据（math/code/long-context）、扩 context 长度、做 reasoning pre-activation。',
+    why: '为什么需要：raw pretrain corpus 质量参差，且 sequence 短（4K）。Mid-training 在 1.5T 量级上用 cleaner / longer / harder 数据。\n\n你的 16B 课程：\n• 12-14T pretrain（4K seq）\n• 1.5T mid-training（32K seq, 数学/代码占比高）\n• 0.5T reasoning pre-activation\n\n这是 Ling 2.0 / K2 / V3 的现代标准。',
+    related: ['pretraining', 'long-context', 'yarn'],
+    deep: '22_FINAL_16B_design.md §2 训练 tokens 表'
+  },
+
+  // ============ TIER 工程并行 ============
+  {
+    id: 'parallelism',
+    en: 'DP / TP / PP / EP (Parallelism Suite)',
+    zh: '并行策略 4 件套',
+    tier: '工程',
+    status: 'settled',
+    gist: 'DP=切数据；TP=切单层矩阵；PP=切层；EP=MoE 特有，切 expert 到不同 GPU。组合用叫 4D parallelism。',
+    why: '\n• **DP (Data Parallel)**：每张卡同一模型副本，不同数据 batch。简单但显存高。\n• **TP (Tensor Parallel)**：单层大矩阵切成 N 块给 N 卡并行。需要 all-reduce。\n• **PP (Pipeline Parallel)**：第 1-15 层在 GPU 0，16-30 在 GPU 1，流水线。需要 bubble 处理。\n• **EP (Expert Parallel)**：MoE 特有。N 个 expert 切到 EP 张卡上，每卡持 N/EP 个 expert。需要 all-to-all。\n\n你的 16B Profile B：DP × TP=1 × PP=1 × EP=8 单节点，或 DP × FSDP × EP=8。\n\nFSDP / ZeRO 是 DP 的低显存变种（分布式 optimizer states），现代默认。',
+    related: ['fsdp', 'all-to-all', 'dropless'],
+    deep: '22_FINAL_16B_design.md §6, 25_node_limited_routing.md'
+  },
+  {
+    id: 'fsdp',
+    en: 'FSDP / ZeRO',
+    zh: 'FSDP（全分片数据并行）',
+    tier: '工程',
+    status: 'settled',
+    gist: 'DP 的低显存变种。把模型参数 / 梯度 / optimizer states 分片到多卡，需要时 all-gather。让 N 张卡总显存 = N × 单卡。',
+    why: 'DeepSpeed ZeRO（Microsoft, 2020）→ PyTorch FSDP / FSDP2（Meta, 2022-2024）。\n\nZeRO 三级：\n• Stage 1：分 optimizer states（最大头）\n• Stage 2：+ 分梯度\n• Stage 3 / FSDP：+ 分参数\n\n你的 16B 训练用 FSDP2 + EP=8 是标准组合。',
+    related: ['parallelism'],
+    deep: '（业界默认）'
+  },
+  {
+    id: 'dropless',
+    en: 'Dropless MoE',
+    zh: '无丢弃 MoE',
+    tier: '工程',
+    status: 'settled',
+    gist: '老 MoE 有 capacity factor，超过就丢 token。现代 MoE 全 dropless：所有 token 都送到 expert，允许 expert 间 batch 不均。',
+    why: '老式（Switch 2021）：设 C=1.25，每个 expert 最多收 C × (B×S/N) 个 token，超出丢弃。kernel 简单（每 expert 固定 batch）但 quality 损失。\n\nDropless（Megablocks 2022 MIT-IBM）：所有 token 送到，允许不均；用 grouped GEMM (ragged sparse matmul) 处理形状不规则。\n\n现代所有 MoE 都用 dropless：quality 显著好，工程复杂度可接受。Megablocks 是事实标准库。',
+    related: ['parallelism', 'all-to-all', 'capacity', 'megablocks'],
+    deep: '22_FINAL_16B_design.md §6'
+  },
+  {
+    id: 'capacity',
+    en: 'Capacity Factor',
+    zh: '容量因子',
+    tier: '工程',
+    status: 'settled',
+    gist: '老式 MoE 的参数：每个 expert 最多收 C × (B×S/N) 个 token，超出丢弃。Dropless MoE 不用这个概念（C=∞）。',
+    why: '历史遗留概念。Switch (2021) C=1.0；Mixtral (2023) C=1.25。\n\n2022 Megablocks 之后业界都改 dropless。你只在读老论文时会遇到这个词。',
+    related: ['dropless'],
+    deep: '10_mixtral.md'
+  },
+  {
+    id: 'all-to-all',
+    en: 'All-to-All Collective',
+    zh: 'All-to-All 通信',
+    tier: '工程',
+    status: 'settled',
+    gist: 'EP 下 token 需要发送到 expert 所在的 GPU。所有 GPU 互相发送/接收，叫 all-to-all。NVLink 4.0 单节点 450 GB/s，跨节点 InfiniBand 慢得多。',
+    why: 'MoE forward 一次需要 2 次 all-to-all：\n1. dispatch（送 token 到 expert 卡）\n2. combine（送结果回原卡）\n\n单节点 8 H100 + NVLink 4.0：带宽 ~450 GB/s，A2/16B 规模 all-to-all 不是瓶颈。\n\n跨节点：InfiniBand 100-400 GB/s，all-to-all 成为瓶颈。这就是 V3 用 node-limited routing M=4 控制跨节点 token 数的原因。\n\n你的 16B EP=8 单节点：不需要 node-limited routing。',
+    related: ['parallelism', 'dropless', 'node-limited'],
+    deep: '25_node_limited_routing.md'
+  },
+  {
+    id: 'megablocks',
+    en: 'Megablocks',
+    zh: 'Megablocks (kernel 库)',
+    tier: '工程',
+    status: 'settled',
+    gist: 'MIT-IBM 开源的 dropless MoE kernel 库。事实标准。提供 permute（dispatch）+ gmm（grouped GEMM）+ combine 三个核心 kernel。',
+    why: '为什么需要专用库：dropless MoE 的 grouped GEMM 形状不规则（每个 expert 收到不同 token 数），普通 cuBLAS 不能处理。Megablocks 用 CUTLASS 自定义 ragged 矩阵乘 kernel。\n\nMegablocks 的核心 3 个 op：\n1. permute(x, top_idx)：按 expert id 排序 token，准备 dispatch\n2. gmm(permuted_x, W_experts)：grouped GEMM 计算所有 expert 输出\n3. combine(expert_out, top_idx, top_g)：weighted sum 回到原 token 顺序\n\n你的 16B 实现完全依赖 Megablocks。开源 friendly，复用面广。',
+    related: ['dropless', 'all-to-all'],
+    deep: '30_routing_implementation.md §2'
+  },
+  {
+    id: 'node-limited',
+    en: 'Node-Limited Routing',
+    zh: '节点限制路由',
+    tier: '工程',
+    status: 'niche',
+    gist: 'V3 用：每 token 最多发到 M 个节点（V3 M=4）。控制跨节点 InfiniBand 流量上限。仅在 EP 跨节点时有用。',
+    why: 'V3 配置：256 routed experts / EP=64 / 8 节点 × 8 GPU。跨节点 InfiniBand 是瓶颈，所以加 M=4 约束让每 token 只去 4 个节点（而不是任意 8 个）。\n\n关键：NLR 不是 load balancing，是通信拓扑约束。\n\n你的 16B EP=8 单节点：**不需要 NLR**，全在 NVLink 内。\n\n仅当 (a) Profile M (256 experts + EP≥16 跨节点) 或 (b) NVLink domain < 8 GPU 时考虑。',
+    related: ['parallelism', 'all-to-all'],
+    deep: '25_node_limited_routing.md'
+  },
+  {
+    id: 'dualpipe',
+    en: 'DualPipe',
+    zh: '双向流水线',
+    tier: '工程',
+    status: 'niche',
+    gist: 'DeepSeek V3 自创的 PP 调度器。让 forward 和 backward 在 EP all-to-all 与 GEMM 计算上完全重叠。1F1B 是更通用的 fallback。',
+    why: 'V3 用 DualPipe 把 all-to-all 通信完全藏在 GEMM 计算之后。需要：\n• 极端定制的 PP 调度\n• 团队对 DeepSeek 内部 stack 熟悉\n\n你的 16B 用 1F1B 调度 + 标准 FSDP/EP 已经足够。DualPipe 是 200B+ 规模才需要的极致优化。',
+    related: ['parallelism', 'all-to-all'],
+    deep: '04_deepseek_v3.md §3.2'
+  },
+
+  {
+    id: 'hidden-alignment',
+    en: 'Hidden Size Alignment',
+    zh: 'Hidden 维度硬件对齐',
+    tier: '工程',
+    status: 'settled',
+    gist: 'Hidden 必须 128 的倍数（BF16 tensor core）+ 能被 head_dim × num_heads 整除 + TP/EP shard 友好。2048 / 2304 / 2560 都合法。',
+    why: '不对齐的后果：\n1. CUDA kernel 性能跌 30-60%（tensor core 无法发挥）\n2. TP 时形状不能均分 → padding 浪费\n3. EP 时 expert 数 / EP 不整 → 负载不均\n4. FlashAttention 走 fallback kernel（慢 10×）\n\n合法 hidden（head_dim=128）：1024, 1280, 1536, 1792, 2048, 2304, 2560, 3072, 4096\n不合法 / 不友好：1500, 1600, 2100（不是 128 倍数）\n\nProfile B 选 2304 = 18 × 128 ✓，配 GQA 18Q/6KV ✓。FFN intermediate 也要对齐 64 / 128。d_expert 同理。',
+    related: ['head-dim', 'parallelism', 'gqa', 'flash-attention'],
+    deep: '33_advanced_concepts.md §3.2'
+  },
+  {
+    id: 'flash-attention',
+    en: 'FlashAttention',
+    zh: 'FlashAttention 算子',
+    tier: '工程',
+    status: 'settled',
+    gist: 'IO-aware 的 attention CUDA kernel，把 attention 计算 fuse 在 GPU SRAM 内。FA2/FA3 是事实标准，所有现代 LLM 训练 / 推理都用。',
+    why: '问题：标准 attention 把 N×N attention matrix 写回 HBM，IO 是瓶颈。N=4K 时 attn matrix=16M 元素，写回带宽吃光。\n\nFlashAttention 的 trick：把 attention 分块 (tile) + 增量 softmax，让 attention 计算完全在 SRAM 里跑，不把中间 matrix 写回 HBM。\n\n版本：\n• FA1 (2022)：标准实现\n• FA2 (2023)：更好的 tile 设计 → 提速 2×\n• FA3 (2024)：H100 Hopper 优化 → 再提速 1.5-2×\n\n约束：only head_dim ∈ {64, 128, 256} optimized。其他 head_dim 走 fallback。\n\n你的 16B 训练默认 FA3 + BF16 / FP8。是 must-have，不消融。',
+    related: ['head-dim', 'mha', 'gqa', 'kvcache'],
+    deep: 'arXiv 2205.14135 (FA1), 2307.08691 (FA2); 业界默认'
+  },
+
+  // ============ TIER 优化器与精度 ============
+  {
+    id: 'adamw',
+    en: 'AdamW (β1, β2, ε, wd)',
+    zh: 'AdamW 优化器',
+    tier: '训练辅助',
+    status: 'settled',
+    gist: 'Adam + 解耦 weight decay。MoE / dense LLM 默认。β1=0.9, β2=0.95, ε=1e-8 或 1e-20, wd=0.1。',
+    why: '\n• β1=0.9 (一阶矩 EMA)：标准\n• β2=0.95 (二阶矩 EMA)：MoE 用 0.95 而不是 Adam 默认 0.999——更敏感于梯度变化\n• **ε=1e-8 (OLMoE / Qwen3 / dots1 派)** vs **ε=1e-20 (V3 / DeepSeek 全家 / mHC 派)**：12 个数量级差！\n  - ε=1e-8：行业默认，社区主流\n  - ε=1e-20：DeepSeek 全家特征，让二阶矩更敏感、训练更稳但接近 fp32 denormal 边界\n  - 你的 wind tunnel A2 T1.1 要回答的开放问题\n• wd=0.1：标准；embedding 也要加 wd（OLMoE 强调）',
+    related: ['muon', 'wsm', 'wsd'],
+    deep: '09_olmoe.md §4.2.6, 27_mhc.md (DeepSeek ε=1e-20)'
+  },
+  {
+    id: 'muon',
+    en: 'Muon Optimizer',
+    zh: 'Muon 优化器',
+    tier: '训练辅助',
+    status: 'open',
+    gist: '正交矩阵 SGD 的现代变种。Moonshot Moonlight / Kimi K2 验证：在大 active scale (1T) 上比 AdamW 改善 pretrain loss ~0.03。',
+    why: 'Muon 想法：把 SGD 的 momentum 投影到正交矩阵流形上，让 update 在矩阵几何上更"有方向"。\n\nKimi K2 在 1T tokens 大规模验证有效。Moonlight 16B 也跑通了。\n\nMuonClip：K2 的变种，用 post-update QK clip 替代 QK-Norm。\n\n你的 16B：A2 T1.2 测试 AdamW vs Muon。**采纳门槛**：loss 改善 ≥ 0.01，因为 Muon 工程复杂度高、Moonshot 之外团队复现不多。',
+    related: ['adamw', 'muonclip', 'qknorm'],
+    deep: '06_kimi_k2.md, 28_open_source_moe_catalog.md (Moonlight row)'
+  },
+  {
+    id: 'muonclip',
+    en: 'MuonClip',
+    zh: 'MuonClip',
+    tier: '稳定性',
+    status: 'niche',
+    gist: 'Kimi K2 发明：Muon 优化器 + 每步 update 后对 Q, K 做 clip（替代 QK-Norm）。效果类似 QK-Norm。',
+    why: 'QK-Norm 是 forward 中的层（每步前向都跑）；MuonClip 是 optimizer step 之后对 Q proj / K proj 的 W 做 clip。\n\n等价目标——防 QK 爆炸——但路径不同。MuonClip 推理零开销，QK-Norm 推理 +0.5%。\n\n你的 16B 默认 QK-Norm（更简单成熟）。MuonClip 仅在 Muon 优化器入选时才需要。',
+    related: ['muon', 'qknorm'],
+    deep: '06_kimi_k2.md'
+  },
+  {
+    id: 'wsm',
+    en: 'WSM Scheduler',
+    zh: 'WSM 学习率调度',
+    tier: '训练辅助',
+    status: 'settled',
+    gist: 'Warmup-Stable-Merge：warmup → 长稳定段 → 末段做 checkpoint 平均。Ling 2.0 §2.4 发明，比 WSD 多 1-2 分下游。',
+    why: '问题：cosine 在长训练下末段 LR 太小、weight 摆动大；WSD（Warmup-Stable-Decay）末段 decay 后 quality OK 但还可改善。\n\nWSM 想法：末段不 decay LR，而是把最后 N 个 checkpoint 做权重平均（model soup style），吸收摆动。\n\nLing 2.0 报 N=32 是最佳。你的 16B Profile B 推荐 WSM。\n\nA2 T1.3 验证 N=16/32/64。',
+    related: ['wsd', 'adamw'],
+    deep: '08_ling_2.md §2.4'
+  },
+  {
+    id: 'wsd',
+    en: 'WSD Scheduler',
+    zh: 'WSD 学习率调度',
+    tier: '训练辅助',
+    status: 'settled',
+    gist: 'Warmup-Stable-Decay：warmup → 长稳定段 → 末段 decay 到 ~0。MiniCPM / dots1 / V3 用。比 cosine 简单。',
+    why: '相比 cosine，WSD 的 stable 段更长（cosine 全程都在 decay）。这让模型可以"看到更多 data 在 peak LR"。\n\ndots1 在 11.2T tokens 上用 WSD 双段 annealing（最后两次 decay）效果好。\n\nWSM 是 WSD 的"升级版"（末段不 decay，做权重平均）。',
+    related: ['wsm', 'adamw'],
+    deep: '24_dots1.md'
+  },
+  {
+    id: 'bf16',
+    en: 'BF16 / FP16 / FP8 / MXFP4',
+    zh: '精度选择',
+    tier: '训练辅助',
+    status: 'settled',
+    gist: '主流 BF16（动态范围大，训练稳）；FP16（动态范围小，需要 loss scale）；FP8（节省 1/2 带宽，需要专用 kernel）；MXFP4（gpt-oss 用，极致压缩）。',
+    why: '\n• **BF16**：8 exponent + 7 mantissa。动态范围 ≈ FP32，但精度低。**MoE 训练默认**\n• **FP16**：5 exp + 10 mant。精度高但动态范围小（max ≈ 65504），需要 loss scaling 避免下溢\n• **FP8**：4-5 exp + 3-4 mant，bandwidth 减半，但需要硬件支持 + 数值技巧（V3 / DeepSeek 全家用）\n• **MXFP4**：4-bit float 微缩格式。gpt-oss 用，权重 + activation 都 MXFP4，极致压缩但推理为主\n\n你的 16B：BF16 master + FP32 router + (可选 A4 后启用 FP8)。FP8 在 200B+ 才显著 ROI。',
+    related: ['fp8'],
+    deep: '04_deepseek_v3.md (FP8 训练)'
+  },
+  {
+    id: 'recompute',
+    en: 'Activation Recomputation',
+    zh: '激活重算',
+    tier: '工程',
+    status: 'settled',
+    gist: 'Forward 时丢弃中间激活，backward 时重算一遍。显存 -40%，计算 +25%。所有大模型训练默认开。',
+    why: 'Forward 中每层产生的激活值占大量显存（attention 的 Q, K, V, attn_out, FFN intermediate 都要存）。Backward 需要这些才能算梯度。\n\n选择性重算（selective recompute）：只重算最贵的（attention softmax 之类），其他存。是显存 vs 计算的良好折衷。\n\n你的 16B 训练显存吃紧时一定开。',
+    related: ['parallelism'],
+    deep: '（业界默认）'
+  },
+
+  // ============ TIER Scaling 与方法论 ============
+  {
+    id: 'scaling-law',
+    en: 'Scaling Law',
+    zh: '缩放律',
+    tier: 'Scaling',
+    status: 'settled',
+    gist: 'Loss = f(参数量, 训练 tokens, FLOPs)。Kaplan 2020 / Chinchilla 2022 给出经验幂律。MoE 有额外维度（active vs total）。',
+    why: 'Kaplan 2020 (OpenAI)：loss ∝ N^(-0.076) × D^(-0.095)，N=params, D=data tokens。\n\nChinchilla 2022 (DeepMind)：修正 Kaplan，得出"参数与 tokens 应 1:20 比例"——70B 模型应训 1.4T tokens。\n\nMoE scaling law（Krajewski 2024）：在 active params 维度上展开 Chinchilla，发现 fine-grained 显著优于 coarse。\n\nReasoning vs memorization (Yokota 2025)：超过 Chinchilla optimal 太多会伤 reasoning。你的 16B 训 15T tokens 比 Chinchilla 的 ~300B 多 50×——这是 over-training 区域，需要 mid-training 补强 reasoning。',
+    related: ['chinchilla', 'overtraining', 'isoflops'],
+    deep: '17_finegrained_scaling.md, 18_params_vs_flops.md, 21_reasoning_vs_memorization.md'
+  },
+  {
+    id: 'chinchilla',
+    en: 'Chinchilla Optimal',
+    zh: 'Chinchilla 最优',
+    tier: 'Scaling',
+    status: 'settled',
+    gist: 'DeepMind 2022 给出"给定 compute budget，params 和 tokens 该按 1:20 比例分配"。70B 模型应训 1.4T tokens。',
+    why: 'Kaplan 原则上低估了 data 的重要性。Chinchilla 重做实验，发现 small-model-more-data 比 big-model-less-data 性价比高。\n\n2024-2025 业界普遍 over-train（远超 Chinchilla 推荐 tokens）：V3 用 14.8T、K2 用 15.5T、Ling 全系 20T+。原因：推理便宜更重要，多花训练 compute 换更小模型推理便宜。\n\n你的 16B 训 15T 是 Chinchilla 的 50×。',
+    related: ['scaling-law', 'overtraining'],
+    deep: '18_params_vs_flops.md'
+  },
+  {
+    id: 'overtraining',
+    en: 'Over-training',
+    zh: '过度训练',
+    tier: 'Scaling',
+    status: 'open',
+    gist: '超过 Chinchilla optimal 的训练。2024-2025 业界普遍如此。Yokota 2025 警告：太多会伤 reasoning。',
+    why: 'Yokota 2025（论文 §21）发现：tokens / params 比例越大，模型越偏 memorization 而非 reasoning。Chinchilla 1:20 是均衡点。\n\nV3 14.8T tokens / 37B active ≈ 400:1，远超 Chinchilla。\n\n你的 16B Profile B 训 15T / 2.4B active ≈ 6000:1，**严重 over-train 区**。补救：\n1. Mid-training 加 reasoning 数据（math / code）\n2. Reasoning pre-activation phase\n3. 如产品偏 reasoning，切 Profile R（active 提到 3B）\n\n这是 22_FINAL §10 风险登记里的最大风险。',
+    related: ['scaling-law', 'chinchilla', 'mid-training', 'reasoning-vs-memo'],
+    deep: '21_reasoning_vs_memorization.md, 22_FINAL_16B_design.md §10'
+  },
+  {
+    id: 'isoflops',
+    en: 'IsoFLOPs Comparison',
+    zh: '同算力对比',
+    tier: 'Scaling',
+    status: 'settled',
+    gist: '"给定 X PFLOPs 训练算力，哪种架构 loss 最低"。Krajewski 等用 isoFLOPs 证明 fine-grained > coarse MoE。',
+    why: '比较模型时单看 active params 或 tokens 都不公平——总算力（FLOPs = active × 6 × tokens）才公平。\n\n经典 isoFLOPs 实验：固定 1e21 FLOPs，比较：\n• 700M dense 训 1.4T tokens\n• 2B/200M-active MoE 训 2T tokens\n• 7B/700M-active MoE 训 0.5T tokens\n\nKrajewski 2024 显示同 FLOPs 下 fine-grained MoE 显著优于 dense 和 coarse MoE。\n\n你的 wind tunnel A2-A4 ladder 本质就是 isoFLOPs ratio 等比变化。',
+    related: ['scaling-law', 'finegrained'],
+    deep: '17_finegrained_scaling.md'
+  },
+  {
+    id: 'reasoning-vs-memo',
+    en: 'Reasoning vs Memorization',
+    zh: '推理 vs 记忆',
+    tier: 'Scaling',
+    status: 'open',
+    gist: 'Yokota 2025: 模型设计有 reasoning 取向 vs memorization 取向。前者要更大 active + 更大 K；后者要更稀疏 + 更大 total。',
+    why: '观察：reasoning 任务（math / code / 逻辑）偏好高 active params + 高 top-K（更多 expert 协同思考）；knowledge 任务（multilingual / 事实记忆）偏好高 total + 极稀疏（更多 long-tail 知识容量）。\n\n方向性证据，不是定量结论——Yokota 给方向但具体最优点没有明定。\n\n你的 16B 三 profile 取向：\n• Profile R（reasoning-leaning）：active 3B + K=8 + N=64\n• Profile B（balanced）：active 2.4B + K=8 + N=64\n• Profile M（memorization）：active 0.8B + K=8 + N=256\n\nWind tunnel A2 T2.3 验证。',
+    related: ['scaling-law', 'overtraining', 'finegrained'],
+    deep: '21_reasoning_vs_memorization.md, 22_FINAL_16B_design.md §3'
+  },
+  {
+    id: 'wind-tunnel',
+    en: 'Wind Tunnel',
+    zh: '风洞实验',
+    tier: 'Scaling',
+    status: 'settled',
+    gist: '用一系列小模型（200M→1B→4B→16B 等比缩小版）做架构消融，验证后再投入主训练。22_FINAL §8 设计 A0-A4 ladder。',
+    why: '动机：16B / 15T 单次训 ~$1.5M，错一个超参就沉没。Wind tunnel 用 ~7% 算力（35K H100-hr）跑 50+ arms 消融。\n\nA0-A4 ladder：\n• A0: 200M/30M/5B → 烧机 sanity\n• A1: 5 个 scaling sweep → 拟合 α 系数\n• A2: 1B/200M/25B → 27 arms 核心消融\n• A3: 4B/600M/80B → scaling 外推验证\n• A4: 16B/2.4B/320B → final 1/50 main run\n\n类比：飞机做风洞测试 / 火箭做缩小模型试飞。',
+    related: ['anchor', 'isoflops'],
+    deep: '22_FINAL_16B_design.md §8, 29_wind_tunnel_a2.md'
+  },
+  {
+    id: 'anchor',
+    en: 'Anchor Model',
+    zh: '锚点模型',
+    tier: 'Scaling',
+    status: 'settled',
+    gist: 'Wind tunnel ladder 上每一档（A0-A4）都叫一个 anchor。Ling 2.0 / OLMoE / mHC 都用了 ladder 锚点跑实验。',
+    why: 'Anchor 不是随便选——要按 power-law 间隔（每档算力 ~5×），保证 scaling 外推可靠。\n\n参考别人的 anchor：\n• mHC：3B / 9B / 27B + 5 个小 (194-528M active)\n• OLMoE：1B / 6.9B\n• Ling-mini-1.0 / Ling-mini-2.0：内部 5 档 sweep\n\nA2 1B/200M-active 直接对标 mHC 3B（缩 1/5）—— 优化器超参可直接借鉴。',
+    related: ['wind-tunnel', 'isoflops'],
+    deep: '29_wind_tunnel_a2.md §2'
+  },
+  {
+    id: 'eval-bench',
+    en: 'MMLU / GSM8K / HumanEval / GPQA',
+    zh: '下游 benchmark',
+    tier: 'Scaling',
+    status: 'settled',
+    gist: 'MoE 模型必跑的下游评估：MMLU (知识), GSM8K (math 小学), HumanEval (code), GPQA-Diamond (硬 reasoning), HellaSwag (常识)。',
+    why: '\n• **MMLU**：57 科目多选，知识广度。5-shot 标准。range 25-90%\n• **GSM8K**：小学应用题。8-shot CoT。range 30-95%\n• **HumanEval**：Python code 生成。pass@1。range 20-90%\n• **GPQA-Diamond**：研究生级科学问答。极难。range 25-60%\n• **HellaSwag**：常识续写。25-90%\n• **C-Eval**：中文知识\n• **BBH**：Big-Bench Hard\n• **IFEval**：指令遵循\n\n你的 wind tunnel A2 每 5B token 跑一次 5 个核心 bench；A2 200M active 上 MMLU 噪声大，GSM8K 接近 random。主要看相对差异。',
+    related: ['wind-tunnel'],
+    deep: '22_FINAL_16B_design.md §7'
+  },
+
+  // ============ TIER Upscale 路径 ============
+  {
+    id: 'depth-width-tradeoff',
+    en: 'Depth vs Width Tradeoff',
+    zh: '深宽权衡',
+    tier: 'Upscale',
+    status: 'open',
+    gist: '同 total/active 下选短宽（low L, high H）还是深窄（high L, low H）。短宽利 latency + upscale headroom；深窄略利 reasoning。Ling-mini-2.0 是短宽代表（20L），GLM-4.5 是深窄代表（92L）。',
+    why: '同参数预算下，模型 "形状" 大致用 L/√H 比值描述。\n\n• L/√H < 0.5：短宽（OLMoE, LongCat, Ling-mini-2.0）\n• L/√H ≈ 0.6：中庸（V2-Lite, Moonlight, Mixtral 8x7B）\n• L/√H > 1.0：深窄（Qwen3-30B, GLM-4.5）\n\n短宽的好处：\n1. 推理 latency 顺序步少\n2. PP bubble 小\n3. Depth upscale headroom 大\n\n短宽的代价：\n1. Reasoning quality 风险（深度对 chain-of-thought 重要）\n2. Attention FLOPs ↑（∝ H²）\n3. Embedding 占比升\n\n证据混合：GLM-4.5 选 92L 为 reasoning；Depth Delusion (2026) 反向说 deep + 160M 多参数反而输 wide。你的 16B 通过 wind tunnel A2 T2.6 验证。',
+    related: ['depth-upscaling', 'solar-dus', 'depth-delusion', 'wind-tunnel'],
+    deep: '32_depth_width_tradeoff.md, depth_width.html (交互页)'
+  },
+  {
+    id: 'depth-upscaling',
+    en: 'Depth Up-Scaling',
+    zh: '深度上扩',
+    tier: 'Upscale',
+    status: 'settled',
+    gist: '把训练好的模型加更多层。SOLAR-DUS / LLaMA Pro / LESA 是三种主流方法。是 dense LLM 主要的"上扩"路径。',
+    why: '当训了一个 base，想要更强能力但又不想 from-scratch 重训，有 3 条路径：\n1. **Depth upscaling**（加层）—— 本概念，SOLAR / LLaMA Pro\n2. **Expert upcycling**（MoE 加 expert）—— Sparse Upcycling 论文（19_*.md）\n3. **Width upscaling**（加 hidden）—— 罕见、难做\n\n关键洞察：起点模型越浅，加深空间越大（headroom）。这就是"矮胖"对 upscale 友好的核心因果。从 20L → 32L 自然合理；从 27L → 50L 已经接近 GLM-4.5 92L 的极端。\n\n你的 16B 计划：Option B 20L base → Stage 2 SOLAR-DUS 加深到 32L → Stage 3 expert upcycle 到 N=128。\n\nMoE 上的 SOLAR 公开案例几乎没有，是已知 unknown。',
+    related: ['solar-dus', 'llama-pro', 'lesa', 'upcycling', 'depth-width-tradeoff'],
+    deep: '32_depth_width_tradeoff.md §5, 19_sparse_upcycling.md'
+  },
+  {
+    id: 'solar-dus',
+    en: 'SOLAR Depth Up-Scaling (DUS)',
+    zh: 'SOLAR 深度上扩',
+    tier: 'Upscale',
+    status: 'settled',
+    gist: 'Upstage 2023-12 发明（arXiv 2312.15166）：复制 base 模型 → 各去除中间 m 层 → 拼接 → continued pretrain 修复。Mistral 7B 32L → SOLAR 48L 验证有效。',
+    why: '为什么不直接复制 layer 拼接？因为简单 stack 破坏 grad flow（Rae 2021 depth tiling 失败原因）。SOLAR 的精妙：复制后各去掉中间 m 层 → 保留 embedding ↔ output 对齐，"伤口"在中间易愈合。\n\n配方：\n1. 复制 base 成 base_a, base_b\n2. base_a 去掉最后 m 层 → 留 (L - m) 层\n3. base_b 去掉最前 m 层 → 留 (L - m) 层\n4. 拼接 base_a + base_b → 2(L - m) 层\n5. Continued pretrain ~3B tokens 修复 grad flow\n\nMistral 7B 32L → m=8 → 24+24 = 48L = SOLAR\n\n**MoE 上没有公开案例**，是你的 16B Stage 2 要解决的 open question。建议先 1B/200M 上做 proof。',
+    related: ['depth-upscaling', 'llama-pro', 'depth-delusion'],
+    deep: '32_depth_width_tradeoff.md §5.1; arXiv 2312.15166'
+  },
+  {
+    id: 'llama-pro',
+    en: 'LLaMA Pro / Block Expansion',
+    zh: 'LLaMA Pro 块扩展',
+    tier: 'Upscale',
+    status: 'settled',
+    gist: '另一种 depth upscaling：在 base 中插入新层，新层初始化为恒等映射（≈ skip connection）。比 SOLAR 更 clean 但收敛慢。',
+    why: '与 SOLAR 的区别：\n• SOLAR：复制 + 去除 + 拼接（"手术"路径）\n• LLaMA Pro：插入恒等层（"温和"路径）\n\nLLaMA Pro 机制：新层 output(x) = x（恒等映射初始化），训练时 unfreeze 新层、freeze 旧层一段时间。这让新层有时间学到有意义的变换而不干扰原 base。\n\n优缺点：\n• ✓ 不破坏 base：旧层完全保留\n• ✓ 实现简单：FFN 和 attention 都好做\n• ✗ 收敛慢：需要更多 continued pretrain budget\n\n实践中很多团队混用：先用 LLaMA Pro 插几层稳一稳，再 SOLAR 拼接做大手术。',
+    related: ['depth-upscaling', 'solar-dus'],
+    deep: '32_depth_width_tradeoff.md §5.1'
+  },
+  {
+    id: 'lesa',
+    en: 'LESA (Learnable Layer Scaling)',
+    zh: 'LESA 可学习层扩展',
+    tier: 'Upscale',
+    status: 'niche',
+    gist: '2025 ACL 论文：用 meta-net 学习"在哪插层、插什么层"。比 SOLAR / LLaMA Pro 更智能但工程复杂。',
+    why: 'SOLAR 和 LLaMA Pro 是 hand-engineered：人决定 m 是多少、在哪插层。LESA 想自动化：让一个 meta-network 在 base 上学习最优插入位置和初始权重。\n\n好处：每个 base 都能"个性化" upscale\n代价：工程复杂；2025-08 才发表，独立复现少\n\n你的 16B 不建议在 Stage 2 用 LESA —— 太新、风险高；先用 SOLAR-DUS（最成熟）即可。',
+    related: ['depth-upscaling', 'solar-dus'],
+    deep: 'aclanthology.org/2025.acl-long.1095.pdf'
+  },
+  {
+    id: 'depth-delusion',
+    en: 'The Depth Delusion (2026)',
+    zh: '深度幻觉论文',
+    tier: 'Upscale',
+    status: 'open',
+    gist: '2026-01 arXiv 2601.20994：在 7B 上 deep + 160M 多参数的模型反而比 wide 配置 quality 差。"额外的 deep 参数是 zombies"。',
+    why: '业界长期假设"深更好"，因为深度允许更多层级抽象。Depth Delusion 实证挑战这点：固定 active 参数下，把额外 160M 放在加层 vs 加宽，wide 配置在下游 benchmark 上更好。\n\n论文结论：超过某个深度后，额外的层学不到东西，只是"占地方"。\n\n注意 caveat：\n• 实验在 dense 7B，未在 MoE 上验证\n• 论文很新（2026-01），独立复现刚起步\n• GLM-4.5 (92L) 反向证据：很深的模型在 reasoning 上仍有效\n\n所以是 mixed signal —— 不能直接把"深 = 浪费"作为定论。但确实削弱了"必须深"的论据，给"短宽 + 多 expert"路线提供了 emerging support。\n\n你的 wind tunnel A2 T2.6 直接验证这事。',
+    related: ['depth-width-tradeoff', 'depth-upscaling'],
+    deep: 'arXiv 2601.20994; 32_depth_width_tradeoff.md §3.3'
+  },
+
+  {
+    id: 'width-upscale',
+    en: 'Width Upscaling (Net2Net)',
+    zh: '宽度上扩',
+    tier: 'Upscale',
+    status: 'niche',
+    gist: '给现有 layer 加新 neuron / channel，函数保持 (function-preserving)。Chen 2015 Net2Net 是经典方法。LLM 上几乎不用，被 depth / expert upscale 取代。',
+    why: 'Net2Net 核心：复制现有权重列 + 加小噪声 + 缩放使 output 不变，实现"温启动加宽"。\n\n为什么 LLM 不用：\n1. Embedding / LM head 也要扩宽 → vocab × H 重 init 难\n2. Attention 需要重设计 head（head_dim 或 head 数变化）\n3. RoPE base 可能需要重调\n4. 收益不显著：宽度增加 attention FLOPs ↑↑ (∝ H²)\n5. modern 替代：直接 from-scratch 训一个更宽的，或加 expert（MoE 路径）\n\nMixtral 8x7B → 8x22B 是 width + depth + expert 同时扩，不算纯 width upscale。\n\n你的 16B Stage 2 / Stage 3 走 depth + expert，不走 width。',
+    related: ['depth-upscaling', 'upcycling'],
+    deep: '33_advanced_concepts.md §7; arXiv 1511.05641'
+  },
+
+  // ============ TIER 特殊创新（小众但重要） ============
+  {
+    id: 'hc-mhc',
+    en: 'HC / mHC (Hyper-Connections)',
+    zh: '超连接 / 流形约束超连接',
+    tier: '稳定性',
+    status: 'niche',
+    gist: 'HC (ByteDance 2024)：把残差从 C 维扩到 n×C 维。mHC (DeepSeek 2025-12)：约束 res mapping 到 doubly stochastic 流形防爆炸。',
+    why: 'HC 想法：标准残差 `h += f(h)` 只有 1 条信息流；HC 用 n=4 条流并行，3 个学习矩阵 mix。理论上更高表达力。\n\nHC 问题：在 27B model 上 12k step 出现 loss surge，残差 composite gain 飙到 3000×。\n\nmHC 修复：把 res mapping 投影到 doubly stochastic 矩阵流形（Birkhoff 多面体），用 Sinkhorn-Knopp 算法保证谱范数 ≤ 1。\n\n你的 16B 不用 HC/mHC：\n• mHC 是 HC 的稳定性补丁，先要 HC 才有 mHC\n• I/O 34d vs vanilla 3d（11×），16B 是 HBM-bound\n• kernel 不开源（TileLang）\n• Kimi AttnRes 比较显示 mHC 不在 loss 上占优',
+    related: ['attnres', 'gradient-spike'],
+    deep: '27_mhc.md'
+  },
+  {
+    id: 'attnres',
+    en: 'Attention Residuals / Block AttnRes',
+    zh: '注意力残差',
+    tier: '稳定性',
+    status: 'open',
+    gist: 'Kimi 2026-03：把标准残差换成"沿深度的 softmax 注意力"。Block 版 I/O 5.5d（vs vanilla 3d，vs mHC 34d）。1.25× scaling 优势。',
+    why: '想法：标准残差 = 沿深度的 linear attention with uniform weights。AttnRes = 沿深度的 softmax attention with learned weights。\n\nFull AttnRes：每层 attend 全部 L 层；I/O 24d。\nBlock AttnRes：把 L 层切 N 块，块间 attend；I/O 5.5d。\n\nKimi 48B/3B + 1.4T tokens 上 vs baseline 全胜：MMLU +1.1, GPQA +7.5, Math +3.6, HumanEval +3.1。\n\n你的 16B：A2 T3.2 验证 Block AttnRes。**采纳门槛**：loss 改善 ≥ 0.005 + 下游 reasoning ≥ +1pt。License 是 CC BY-NC-ND 4.0，限商用，需 legal 确认。',
+    related: ['hc-mhc', 'residual'],
+    deep: '26_attention_residuals.md'
+  },
+  {
+    id: 'zero-experts',
+    en: 'Zero Experts (LongCat)',
+    zh: '零专家（恒等映射）',
+    tier: '路由',
+    status: 'niche',
+    gist: 'LongCat-Flash (Meituan 2025-09)：256 个 "identity routing" slots，让 token 可以"跳过"任何 expert 直接回到残差。',
+    why: '想法：有些 token 不需要 MoE 处理（已经表示得够好），让 router 可以选 zero expert（identity）。N_routed=512, K=12, 其中 256 个是 zero expert.\n\n实现等价于"动态层数"——某些 token 实际经过的 expert 数 < K。\n\n太新（25-09），独立复现不足。你的 16B 不引入，但作为"未来 N_routed=256 时的研究方向"记录。',
+    related: ['routed', 'topk'],
+    deep: '28_open_source_moe_catalog.md §4 G'
+  },
+  {
+    id: 'moge',
+    en: 'MoGE (Mixture of Grouped Experts)',
+    zh: '分组专家路由',
+    tier: '路由',
+    status: 'niche',
+    gist: 'Pangu Pro MoE (Huawei 2025-05)：N=64 expert 分 8 组，每组强制 top-1（共 top-8）。Grouped balance 替代 ALF。',
+    why: '强制结构性 balance：每组必有 1 个 expert 被选，自然不会有 dead expert。\n\n副作用：限制了 router 的"自由度"——它不能把 8 个 token 都送同一组。但实践上 loss 仍然好。\n\n仅 Pangu Pro 用，外部独立复现少。你的 16B 不引入。',
+    related: ['routed', 'load-balance', 'alf'],
+    deep: '28_open_source_moe_catalog.md §4 G'
+  },
+
+];
+
+// ============ Render & Interactions ============
+
+const list = document.getElementById('conceptList');
+const searchInput = document.getElementById('search');
+const tierChips = document.querySelectorAll('.tier-chip');
+const masteredCountEl = document.getElementById('masteredCount');
+const totalCountEl = document.getElementById('totalCount');
+const STORAGE_KEY = 'moe-concepts-progress-v1';
+
+let progress = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+let activeTier = 'all';
+let hideMastered = false;
+let quizMode = false;
+
+function escapeHTML(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function highlightMatch(text, query) {
+  if (!query) return escapeHTML(text);
+  const safe = escapeHTML(text);
+  const q = escapeHTML(query);
+  const re = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+  return safe.replace(re, '<mark>$1</mark>');
+}
+
+function statusBadge(status) {
+  if (status === 'settled') return '<span class="status-badge status-settled" title="业界共识，多个 SOTA 验证">✓ 共识</span>';
+  if (status === 'open') return '<span class="status-badge status-open" title="仍有争议或待 A2 验证">⚠ 待验证</span>';
+  if (status === 'niche') return '<span class="status-badge status-niche" title="小众路线或特殊创新">※ 小众</span>';
+  return '';
+}
+
+function tierGroupHeader(tier) {
+  const map = {
+    '入门': '0. 入门基础 — 必须先建立的 mental model',
+    '路由': '1. 路由与均衡 — MoE 的灵魂与必须解决的问题',
+    '细粒度': '2. 细粒度 & MoE 结构选项',
+    'Attention': '3. Attention 家族 — KV cache 的优化战场',
+    '稳定性': '4. 网络与稳定性 — MoE 训练的必备防护',
+    '训练辅助': '5. 训练辅助 — MTP / 优化器 / scheduler',
+    '工程': '6. 工程并行 — DP/TP/PP/EP/Dropless',
+    'Scaling': '7. Scaling 与方法论 — 风洞与决策依据',
+    'Upscale': '8. Upscale 路径 — 把 16B 扩到 32B+ 的方法',
+  };
+  return map[tier] || tier;
+}
+
+function renderAll() {
+  const query = searchInput.value.trim().toLowerCase();
+  let html = '';
+  let lastTier = null;
+  let masteredN = 0;
+
+  CONCEPTS.forEach((c) => {
+    if (progress[c.id]) masteredN++;
+  });
+
+  const filtered = CONCEPTS.filter((c) => {
+    if (activeTier !== 'all' && c.tier !== activeTier) return false;
+    if (hideMastered && progress[c.id]) return false;
+    if (query) {
+      const hay = (c.en + ' ' + c.zh + ' ' + c.gist + ' ' + c.why + ' ' + c.tier).toLowerCase();
+      if (!hay.includes(query)) return false;
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    html = '<div style="padding: 40px; text-align: center; color: var(--text-soft);">没有匹配的概念。换个关键词或点"全部" tier。</div>';
+  } else {
+    filtered.forEach((c) => {
+      if (c.tier !== lastTier) {
+        html += `<div class="tier-divider" id="tier-${c.tier}"><span class="num">▸</span> ${tierGroupHeader(c.tier)}</div>`;
+        lastTier = c.tier;
+      }
+      const mastered = !!progress[c.id];
+      const relatedHTML = (c.related || []).map((rid) => {
+        const r = CONCEPTS.find(x => x.id === rid);
+        const label = r ? (r.en + ' / ' + r.zh) : rid;
+        return `<span class="related-chip" data-jump="${rid}">${escapeHTML(label)}</span>`;
+      }).join(' ');
+      html += `
+<div class="concept ${mastered ? 'mastered' : ''}" data-id="${c.id}" data-tier="${c.tier}">
+  <div class="concept-head">
+    <span class="concept-en">${highlightMatch(c.en, query)}</span>
+    <span class="concept-zh">${highlightMatch(c.zh, query)}</span>
+    <span class="tier-badge">${c.tier}</span>
+    ${statusBadge(c.status)}
+  </div>
+  <div class="quiz-prompt">用 1-2 句话解释 <strong>${c.en} (${c.zh})</strong> 是什么、为什么这样设计？</div>
+  <div class="gist">${highlightMatch(c.gist, query)}</div>
+  <button class="reveal-btn" onclick="this.closest('.concept').classList.add('revealed')">显示答案</button>
+  <button class="why-toggle" onclick="toggleExp(this, 'why')">▸ 为什么这样设计（因果链）</button>
+  <div class="expandable" data-kind="why"><span class="label">因果 / 设计动机</span>${escapeHTML(c.why).replace(/\n/g, '<br>')}</div>
+  ${relatedHTML ? `<button class="related-toggle" onclick="toggleExp(this, 'related')">▸ 关联概念（${(c.related||[]).length}）</button>
+  <div class="expandable" data-kind="related"><span class="label">关联概念</span>${relatedHTML}</div>` : ''}
+  <button class="dive-toggle" onclick="toggleExp(this, 'dive')">▸ 深入阅读</button>
+  <div class="expandable" data-kind="dive"><span class="label">本仓库相关笔记</span>${escapeHTML(c.deep)}</div>
+  <div class="controls-bottom">
+    <label class="mastered-toggle">
+      <input type="checkbox" ${mastered ? 'checked' : ''} onchange="toggleMastered('${c.id}', this.checked)">
+      我已经掌握
+    </label>
+  </div>
+</div>`;
+    });
+  }
+
+  list.innerHTML = html;
+  masteredCountEl.textContent = masteredN;
+  totalCountEl.textContent = CONCEPTS.length;
+}
+
+function toggleExp(btn, kind) {
+  const card = btn.closest('.concept');
+  const exp = card.querySelector(`.expandable[data-kind="${kind}"]`);
+  exp.classList.toggle('show');
+  // toggle arrow
+  if (btn.textContent.startsWith('▸')) btn.textContent = btn.textContent.replace('▸', '▾');
+  else btn.textContent = btn.textContent.replace('▾', '▸');
+}
+
+function toggleMastered(id, val) {
+  if (val) progress[id] = true;
+  else delete progress[id];
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+  // refresh card class + count
+  const card = document.querySelector(`.concept[data-id="${id}"]`);
+  if (card) card.classList.toggle('mastered', val);
+  let mc = 0;
+  CONCEPTS.forEach((c) => { if (progress[c.id]) mc++; });
+  masteredCountEl.textContent = mc;
+  if (hideMastered) renderAll();
+}
+
+// Search
+searchInput.addEventListener('input', () => renderAll());
+
+// Tier chips
+tierChips.forEach((chip) => {
+  chip.addEventListener('click', () => {
+    tierChips.forEach((c) => c.classList.remove('active'));
+    chip.classList.add('active');
+    activeTier = chip.dataset.tier;
+    renderAll();
+  });
+});
+
+// Controls
+document.getElementById('quizBtn').addEventListener('click', (e) => {
+  quizMode = !quizMode;
+  document.body.classList.toggle('quiz-mode', quizMode);
+  e.target.classList.toggle('active', quizMode);
+  e.target.textContent = quizMode ? '🎯 退出 Quiz' : '🎯 Quiz 模式';
+  if (!quizMode) {
+    document.querySelectorAll('.concept.revealed').forEach((c) => c.classList.remove('revealed'));
+  }
+});
+
+document.getElementById('masteredBtn').addEventListener('click', (e) => {
+  hideMastered = !hideMastered;
+  e.target.classList.toggle('active', hideMastered);
+  e.target.textContent = hideMastered ? '显示已掌握' : '隐藏已掌握';
+  renderAll();
+});
+
+document.getElementById('expandAllBtn').addEventListener('click', () => {
+  document.querySelectorAll('.expandable').forEach((e) => e.classList.add('show'));
+  document.querySelectorAll('.why-toggle, .related-toggle, .dive-toggle').forEach((b) => {
+    b.textContent = b.textContent.replace('▸', '▾');
+  });
+});
+
+document.getElementById('collapseAllBtn').addEventListener('click', () => {
+  document.querySelectorAll('.expandable').forEach((e) => e.classList.remove('show'));
+  document.querySelectorAll('.why-toggle, .related-toggle, .dive-toggle').forEach((b) => {
+    b.textContent = b.textContent.replace('▾', '▸');
+  });
+});
+
+document.getElementById('themeBtn').addEventListener('click', () => {
+  const cur = document.body.getAttribute('data-theme');
+  document.body.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  if (!confirm('清除所有"已掌握"进度？')) return;
+  progress = {};
+  localStorage.removeItem(STORAGE_KEY);
+  renderAll();
+});
+
+// related chip click → jump
+list.addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-jump]');
+  if (!chip) return;
+  const id = chip.dataset.jump;
+  // clear search & filter to ensure visible
+  searchInput.value = '';
+  activeTier = 'all';
+  tierChips.forEach((c) => c.classList.toggle('active', c.dataset.tier === 'all'));
+  renderAll();
+  // wait for render
+  setTimeout(() => {
+    const target = document.querySelector(`.concept[data-id="${id}"]`);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.style.transition = 'background 0.3s';
+      target.style.background = 'rgba(124, 196, 255, 0.18)';
+      setTimeout(() => { target.style.background = ''; }, 1200);
+    }
+  }, 50);
+});
+
+renderAll();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>16B MoE 短宽设计 — 交互分析</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --bg-soft: #1a1d24;
+    --bg-card: #1f232c;
+    --border: #2d323e;
+    --text: #e6e8eb;
+    --text-soft: #9aa3b2;
+    --accent: #7cc4ff;
+    --accent-2: #ffb86b;
+    --warn: #ff7b7b;
+    --ok: #7bd88f;
+    --opt-base: #5ec8ff;
+    --opt-a: #fbbf24;
+    --opt-b: #7bd88f;
+    --opt-c: #f87171;
+    --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  }
+  [data-theme="light"] {
+    --bg: #f7f8fa;
+    --bg-soft: #ffffff;
+    --bg-card: #ffffff;
+    --border: #e5e7eb;
+    --text: #1f2937;
+    --text-soft: #6b7280;
+    --accent: #0969da;
+    --accent-2: #c97a14;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    line-height: 1.65;
+  }
+
+  /* Header */
+  header {
+    position: sticky; top: 0; z-index: 100;
+    background: var(--bg-soft);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  .header-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .title { font-weight: 700; font-size: 18px; color: var(--accent); white-space: nowrap; }
+  .subtitle { color: var(--text-soft); font-size: 13px; }
+  .tabnav { display: flex; gap: 4px; flex-wrap: wrap; }
+  .tab-btn {
+    background: transparent; color: var(--text-soft);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 14px; font-size: 13px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tab-btn:hover { color: var(--text); border-color: var(--accent); }
+  .tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.ctl {
+    background: var(--bg-card); color: var(--text-soft);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 5px 12px; font-size: 12px; cursor: pointer;
+    transition: all 0.15s;
+    margin-left: auto;
+  }
+  button.ctl:hover { color: var(--text); }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+  /* Sections (tab targets) */
+  section.tab-section { display: none; }
+  section.tab-section.active { display: block; }
+
+  h2 { color: var(--text); border-bottom: 2px solid var(--border); padding-bottom: 8px; margin-top: 0; }
+  h3 { color: var(--accent); margin-top: 24px; }
+
+  /* TLDR box */
+  .tldr {
+    background: var(--bg-card);
+    border-left: 4px solid var(--accent);
+    padding: 14px 18px; border-radius: 6px;
+    margin-bottom: 24px; font-size: 14px;
+  }
+  .tldr strong { color: var(--ok); }
+
+  /* Option cards grid */
+  .options-grid {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    margin-bottom: 24px;
+  }
+  .option-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-top: 4px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+    transition: transform 0.1s;
+  }
+  .option-card:hover { transform: translateY(-2px); }
+  .option-card[data-id="baseline"] { border-top-color: var(--opt-base); }
+  .option-card[data-id="A"] { border-top-color: var(--opt-a); }
+  .option-card[data-id="B"] { border-top-color: var(--opt-b); }
+  .option-card[data-id="C"] { border-top-color: var(--opt-c); }
+  .option-card.recommended { box-shadow: 0 0 0 2px var(--opt-b); position: relative; }
+  .option-card.recommended::after {
+    content: "⭐ 推荐";
+    position: absolute; top: -10px; right: 12px;
+    background: var(--opt-b); color: #000;
+    padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;
+  }
+  .opt-name { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  .opt-tagline { font-size: 13px; color: var(--text-soft); margin-bottom: 12px; }
+  .opt-stats { font-family: var(--mono); font-size: 13px; line-height: 1.8; }
+  .opt-stats .row { display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px dashed var(--border); }
+  .opt-stats .row:last-child { border-bottom: none; }
+  .opt-stats .key { color: var(--text-soft); }
+  .opt-stats .val { color: var(--text); font-weight: 600; }
+  .opt-stats .delta-positive { color: var(--ok); font-size: 11px; margin-left: 6px; }
+  .opt-stats .delta-negative { color: var(--warn); font-size: 11px; margin-left: 6px; }
+  .opt-stats .delta-neutral { color: var(--text-soft); font-size: 11px; margin-left: 6px; }
+
+  /* Calculator */
+  .calc-grid {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 24px;
+  }
+  @media (max-width: 900px) { .calc-grid { grid-template-columns: 1fr; } }
+  .calc-inputs {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .calc-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+  .calc-row label { font-size: 12px; color: var(--text-soft); font-family: var(--mono); }
+  .calc-row label .hint { color: var(--accent-2); margin-left: 6px; }
+  .calc-row input[type="number"], .calc-row select {
+    background: var(--bg-soft);
+    color: var(--text); border: 1px solid var(--border); border-radius: 4px;
+    padding: 6px 10px; font-family: var(--mono); font-size: 14px; width: 100%;
+  }
+  .calc-row input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .range-display { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: var(--text-soft); }
+  .range-display .current { color: var(--accent); font-weight: 700; }
+
+  .preset-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  .preset-btn {
+    background: var(--bg-soft); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 5px 10px; font-size: 12px; cursor: pointer;
+    font-family: var(--mono); transition: all 0.15s;
+  }
+  .preset-btn:hover { border-color: var(--accent); }
+  .preset-btn[data-preset="baseline"]:hover { border-color: var(--opt-base); }
+  .preset-btn[data-preset="A"]:hover { border-color: var(--opt-a); }
+  .preset-btn[data-preset="B"]:hover { border-color: var(--opt-b); }
+  .preset-btn[data-preset="C"]:hover { border-color: var(--opt-c); }
+
+  .calc-output {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px;
+  }
+  .big-stat {
+    margin-bottom: 18px; padding-bottom: 14px;
+    border-bottom: 1px dashed var(--border);
+  }
+  .big-stat-label { font-size: 12px; color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.5px; }
+  .big-stat-value { font-size: 32px; font-weight: 700; color: var(--accent); font-family: var(--mono); }
+  .big-stat-value .unit { font-size: 18px; color: var(--text-soft); margin-left: 4px; }
+  .big-stat-delta { font-size: 13px; color: var(--text-soft); margin-top: 4px; }
+  .big-stat-delta.up { color: var(--accent-2); }
+  .big-stat-delta.down { color: var(--ok); }
+
+  .breakdown-bar {
+    display: flex; height: 30px; border-radius: 4px; overflow: hidden;
+    background: var(--bg-soft); border: 1px solid var(--border);
+    margin: 12px 0;
+  }
+  .breakdown-seg {
+    display: flex; align-items: center; justify-content: center;
+    color: #000; font-size: 11px; font-weight: 600; font-family: var(--mono);
+    min-width: 0; overflow: hidden;
+  }
+  .breakdown-legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--text-soft); margin-top: 6px; }
+  .breakdown-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+  .stat-mini {
+    background: var(--bg-soft); border-radius: 4px;
+    padding: 8px 12px; border-left: 3px solid var(--border);
+  }
+  .stat-mini-label { font-size: 11px; color: var(--text-soft); }
+  .stat-mini-value { font-family: var(--mono); font-size: 16px; color: var(--text); font-weight: 600; }
+
+  /* Comparison bars */
+  .compare-row {
+    display: grid; grid-template-columns: 140px 1fr;
+    gap: 12px; align-items: center; margin-bottom: 12px;
+  }
+  .compare-label { font-size: 14px; color: var(--text); font-weight: 600; }
+  .compare-label .sub { font-size: 11px; color: var(--text-soft); display: block; font-weight: normal; }
+  .compare-bars { display: flex; flex-direction: column; gap: 4px; }
+  .compare-bar {
+    display: grid; grid-template-columns: 80px 1fr 100px;
+    gap: 10px; align-items: center; font-size: 12px;
+  }
+  .compare-bar .opt-tag {
+    font-family: var(--mono); font-size: 11px; padding: 1px 8px;
+    border-radius: 3px; text-align: center; color: #000; font-weight: 700;
+  }
+  .compare-bar .opt-tag[data-id="baseline"] { background: var(--opt-base); }
+  .compare-bar .opt-tag[data-id="A"] { background: var(--opt-a); }
+  .compare-bar .opt-tag[data-id="B"] { background: var(--opt-b); }
+  .compare-bar .opt-tag[data-id="C"] { background: var(--opt-c); }
+  .compare-bar .bar-track {
+    height: 14px; background: var(--bg-soft); border-radius: 7px;
+    overflow: hidden; position: relative; border: 1px solid var(--border);
+  }
+  .compare-bar .bar-fill {
+    height: 100%; border-radius: 7px;
+    transition: width 0.3s;
+  }
+  .compare-bar .bar-fill[data-id="baseline"] { background: var(--opt-base); }
+  .compare-bar .bar-fill[data-id="A"] { background: var(--opt-a); }
+  .compare-bar .bar-fill[data-id="B"] { background: var(--opt-b); }
+  .compare-bar .bar-fill[data-id="C"] { background: var(--opt-c); }
+  .compare-bar .bar-value {
+    font-family: var(--mono); font-size: 11px; color: var(--text); text-align: right;
+  }
+  .compare-bar.invert .bar-fill { background: linear-gradient(90deg, var(--ok), var(--warn)); }
+
+  /* SVG diagram */
+  .roadmap { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 14px 0; }
+  .stage {
+    padding: 12px 16px; margin-bottom: 8px;
+    background: var(--bg-soft); border-radius: 6px;
+    border-left: 4px solid var(--accent);
+  }
+  .stage-name { font-weight: 700; color: var(--text); font-size: 14px; }
+  .stage-spec { font-family: var(--mono); font-size: 13px; color: var(--text-soft); margin: 4px 0; }
+  .stage-cost { font-size: 11px; color: var(--accent-2); }
+  .stage-arrow { text-align: center; color: var(--accent); font-size: 24px; margin: -4px 0 -8px; }
+
+  /* Decision tree */
+  .decision-tree {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 24px; margin: 20px 0;
+  }
+  .question { margin-bottom: 16px; }
+  .question-text { font-weight: 600; margin-bottom: 8px; color: var(--text); }
+  .question-text .q-num {
+    display: inline-block; width: 24px; height: 24px;
+    background: var(--accent); color: #000; border-radius: 50%;
+    text-align: center; line-height: 24px; font-size: 13px; margin-right: 10px;
+  }
+  .answer-row { display: flex; gap: 8px; flex-wrap: wrap; margin-left: 34px; }
+  .answer-btn {
+    background: var(--bg-soft); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 14px; font-size: 13px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .answer-btn:hover { border-color: var(--accent); }
+  .answer-btn.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .recommendation-box {
+    margin-top: 20px; padding: 16px 20px;
+    background: var(--bg-soft); border: 2px dashed var(--ok);
+    border-radius: 8px; min-height: 60px;
+    font-size: 14px;
+  }
+  .recommendation-box .rec-label { color: var(--ok); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; display: block; }
+  .recommendation-box .rec-name { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  .recommendation-box .rec-detail { color: var(--text-soft); font-size: 13px; }
+
+  /* Tables */
+  table.compact {
+    width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0;
+  }
+  table.compact th, table.compact td {
+    text-align: left; padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.compact th {
+    color: var(--text-soft); font-weight: 600; background: var(--bg-soft);
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  table.compact tr.recommended-row { background: rgba(123, 216, 143, 0.08); }
+  table.compact tr.recommended-row td:first-child::before { content: "⭐ "; }
+
+  /* Risk tags */
+  .risk-tag {
+    display: inline-block; padding: 1px 8px; border-radius: 999px;
+    font-size: 11px; font-family: var(--mono);
+  }
+  .risk-low { background: rgba(123,216,143,0.18); color: var(--ok); }
+  .risk-med { background: rgba(255,184,107,0.18); color: var(--accent-2); }
+  .risk-high { background: rgba(255,123,123,0.18); color: var(--warn); }
+
+  footer { margin-top: 50px; padding: 20px; text-align: center; color: var(--text-soft); font-size: 12px; border-top: 1px solid var(--border); }
+  footer a { color: var(--accent); }
+  code { background: var(--bg-card); padding: 1px 6px; border-radius: 3px; font-family: var(--mono); font-size: 12px; }
+</style>
+</head>
+<body data-theme="dark">
+
+<header>
+  <div class="header-row">
+    <span class="title">🏗️ 16B MoE 短宽设计</span>
+    <span class="subtitle">交互分析 / 参数计算 / Upscale 路径</span>
+    <div class="tabnav">
+      <button class="tab-btn active" data-tab="overview">总览</button>
+      <button class="tab-btn" data-tab="calc">⚙️ 计算器</button>
+      <button class="tab-btn" data-tab="compare">📊 维度对比</button>
+      <button class="tab-btn" data-tab="roadmap">🛤️ Upscale 路径</button>
+      <button class="tab-btn" data-tab="decision">🎯 决策树</button>
+      <button class="tab-btn" data-tab="risks">⚠️ 风险与下一步</button>
+    </div>
+    <button class="ctl" id="themeBtn">☀️/🌙</button>
+  </div>
+</header>
+
+<main>
+
+<!-- ============ 总览 ============ -->
+<section class="tab-section active" id="overview">
+  <div class="tldr">
+    <strong>一句话：</strong>把 22_FINAL Profile B 从 <code>27L/2048</code> 改成 <code>20L/2304</code>（Option B），<strong>层减 26%、hidden 加 12%</strong>，total/active 不变，attention FLOPs 不增反降（0.94×），latency 降 26%，给后续 SOLAR 式 depth upscale 留下 2.0× 翻倍空间。<strong>但 reasoning quality 有 ~1-2pt 风险，必须 A2 T2.6 验证后才切主 spec。</strong>
+  </div>
+
+  <h3>四个候选配置对比</h3>
+  <div class="options-grid">
+    <div class="option-card" data-id="baseline">
+      <div class="opt-name">Baseline (V2-Lite)</div>
+      <div class="opt-tagline">业界 16B 主流，稳妥</div>
+      <div class="opt-stats">
+        <div class="row"><span class="key">Layers</span><span class="val">27</span></div>
+        <div class="row"><span class="key">Hidden</span><span class="val">2048</span></div>
+        <div class="row"><span class="key">d_expert</span><span class="val">1408</span></div>
+        <div class="row"><span class="key">L/√H</span><span class="val">0.60</span></div>
+        <div class="row"><span class="key">Total</span><span class="val">15.5 B</span></div>
+        <div class="row"><span class="key">Active 严格</span><span class="val">2.40 B</span></div>
+        <div class="row"><span class="key">Latency 减</span><span class="val">— <span class="delta-neutral">基准</span></span></div>
+        <div class="row"><span class="key">Upscale 倍数</span><span class="val">1.5×</span></div>
+        <div class="row"><span class="key">已有 SOTA 验证</span><span class="val">V2-Lite, Moonlight</span></div>
+      </div>
+    </div>
+
+    <div class="option-card" data-id="A">
+      <div class="opt-name">Option A — 温和短宽</div>
+      <div class="opt-tagline">V2-Lite 浅版，最保守的改动</div>
+      <div class="opt-stats">
+        <div class="row"><span class="key">Layers</span><span class="val">24 <span class="delta-positive">-11%</span></span></div>
+        <div class="row"><span class="key">Hidden</span><span class="val">2048</span></div>
+        <div class="row"><span class="key">d_expert</span><span class="val">1664</span></div>
+        <div class="row"><span class="key">L/√H</span><span class="val">0.53</span></div>
+        <div class="row"><span class="key">Total</span><span class="val">16.1 B <span class="delta-neutral">+0.6 B</span></span></div>
+        <div class="row"><span class="key">Active 严格</span><span class="val">2.44 B</span></div>
+        <div class="row"><span class="key">Latency 减</span><span class="val">-11%</span></div>
+        <div class="row"><span class="key">Upscale 倍数</span><span class="val">1.7×</span></div>
+        <div class="row"><span class="key">已有 SOTA 验证</span><span class="val">无直接</span></div>
+      </div>
+    </div>
+
+    <div class="option-card recommended" data-id="B">
+      <div class="opt-name">Option B — 中等短宽</div>
+      <div class="opt-tagline">Ling-mini-2.0 同 layer + 加宽 hidden</div>
+      <div class="opt-stats">
+        <div class="row"><span class="key">Layers</span><span class="val">20 <span class="delta-positive">-26%</span></span></div>
+        <div class="row"><span class="key">Hidden</span><span class="val">2304 <span class="delta-neutral">+12.5%</span></span></div>
+        <div class="row"><span class="key">d_expert</span><span class="val">1792</span></div>
+        <div class="row"><span class="key">L/√H</span><span class="val">0.42</span></div>
+        <div class="row"><span class="key">Total</span><span class="val">16.3 B <span class="delta-neutral">+0.8 B</span></span></div>
+        <div class="row"><span class="key">Active 严格</span><span class="val">2.49 B</span></div>
+        <div class="row"><span class="key">Latency 减</span><span class="val">-26% <span class="delta-positive">✓</span></span></div>
+        <div class="row"><span class="key">Upscale 倍数</span><span class="val">2.0× <span class="delta-positive">✓</span></span></div>
+        <div class="row"><span class="key">已有 SOTA 验证</span><span class="val">Ling-mini-2.0 (20L)</span></div>
+      </div>
+    </div>
+
+    <div class="option-card" data-id="C">
+      <div class="opt-name">Option C — 激进短宽</div>
+      <div class="opt-tagline">LongCat / OLMoE 极端路线</div>
+      <div class="opt-stats">
+        <div class="row"><span class="key">Layers</span><span class="val">16 <span class="delta-positive">-41%</span></span></div>
+        <div class="row"><span class="key">Hidden</span><span class="val">2560 <span class="delta-neutral">+25%</span></span></div>
+        <div class="row"><span class="key">d_expert</span><span class="val">2048</span></div>
+        <div class="row"><span class="key">L/√H</span><span class="val">0.31</span></div>
+        <div class="row"><span class="key">Total</span><span class="val">16.4 B</span></div>
+        <div class="row"><span class="key">Active 严格</span><span class="val">2.49 B</span></div>
+        <div class="row"><span class="key">Latency 减</span><span class="val">-41%</span></div>
+        <div class="row"><span class="key">Upscale 倍数</span><span class="val">2.0× (16→32)</span></div>
+        <div class="row"><span class="key">已有 SOTA 验证</span><span class="val">OLMoE (16L, 但小 7×)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>核心因果链（教学版）</h3>
+  <p>"矮胖"对 upscale 友好的三条因果：</p>
+  <ol>
+    <li><strong>Upscale 路径有三条</strong>：加深 (depth) / 加专家 (expert upcycle) / 加宽 (rare)。<strong>起点越浅，加深空间越大</strong>—— 从 16 层翻到 32 层 vs 从 27 层翻到 54 层，前者更稳。</li>
+    <li><strong>Latency 直接收益</strong>：推理一个 token 必须<strong>顺序</strong>走完所有 L 层（不能并行），层少 = latency 减。Option B 比 baseline 减 26%。</li>
+    <li><strong>Quality 风险</strong>：但短模型在 reasoning task 上有 1-2pt 风险（GLM-4.5 选 92 层正是为 reasoning）；不过 <em>Depth Delusion</em> (2026-01) 反向证据指出 7B 上 deep 反而比 wide 差。证据混合，需要 A2 自验。</li>
+  </ol>
+
+  <h3>主流模型 depth/width 分布</h3>
+  <p>按 L/√H 排序（小 = 短宽，大 = 高瘦）：</p>
+  <table class="compact">
+    <thead>
+      <tr><th>Model</th><th>Total</th><th>Layers</th><th>Hidden</th><th>L/√H</th><th>取向</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>LongCat-Flash</td><td>560B</td><td>28</td><td>6144</td><td>0.36</td><td>极短宽</td></tr>
+      <tr><td>OLMoE</td><td>6.9B</td><td>16</td><td>2048</td><td>0.35</td><td>短宽</td></tr>
+      <tr><td>Ling-mini-2.0</td><td>16B</td><td>20</td><td>2048</td><td>0.44</td><td>短宽</td></tr>
+      <tr><td>Mixtral 8x7B</td><td>47B</td><td>32</td><td>4096</td><td>0.50</td><td>中庸</td></tr>
+      <tr class="recommended-row"><td>DeepSeek-V2-Lite (你的 baseline)</td><td>15.7B</td><td>27</td><td>2048</td><td>0.60</td><td>中庸</td></tr>
+      <tr><td>Qwen3-30B-A3B</td><td>30B</td><td>48</td><td>2048</td><td>1.06</td><td>高瘦</td></tr>
+      <tr><td>GLM-4.5 (reasoning 路线)</td><td>355B</td><td>92</td><td>5120</td><td>1.29</td><td>极高瘦</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ 计算器 ============ -->
+<section class="tab-section" id="calc">
+  <h2>⚙️ 参数计算器</h2>
+  <p style="color: var(--text-soft); font-size: 14px;">
+    实时计算 Total params / Active params / Sparsity。调整任一参数即看结果。<strong>FFN 默认 SwiGLU 三矩阵</strong>（gate / up / down），Attention 默认 GQA 4:1。先点 preset 加载基准。
+  </p>
+
+  <div class="preset-row">
+    <button class="preset-btn" data-preset="baseline">Baseline · 27L/2048</button>
+    <button class="preset-btn" data-preset="A">Option A · 24L/2048</button>
+    <button class="preset-btn" data-preset="B">Option B · 20L/2304 ⭐</button>
+    <button class="preset-btn" data-preset="C">Option C · 16L/2560</button>
+  </div>
+
+  <div class="calc-grid">
+    <div class="calc-inputs">
+      <div class="calc-row">
+        <label>Layers (含第 0 层 dense)</label>
+        <input type="range" id="L" min="12" max="40" step="1" value="20">
+        <div class="range-display"><span>12</span><span class="current" id="L-val">20</span><span>40</span></div>
+      </div>
+      <div class="calc-row">
+        <label>Hidden dim <span class="hint">建议 multiple of 128</span></label>
+        <select id="H">
+          <option value="1024">1024</option>
+          <option value="1280">1280</option>
+          <option value="1536">1536</option>
+          <option value="1792">1792</option>
+          <option value="2048">2048</option>
+          <option value="2304" selected>2304</option>
+          <option value="2560">2560</option>
+          <option value="3072">3072</option>
+          <option value="4096">4096</option>
+        </select>
+      </div>
+      <div class="calc-row">
+        <label>N_routed (路由 expert 数)</label>
+        <select id="Nr">
+          <option value="8">8</option>
+          <option value="16">16</option>
+          <option value="32">32</option>
+          <option value="64" selected>64</option>
+          <option value="96">96</option>
+          <option value="128">128</option>
+          <option value="160">160</option>
+          <option value="192">192</option>
+          <option value="256">256</option>
+          <option value="384">384</option>
+        </select>
+      </div>
+      <div class="calc-row">
+        <label>Top-K (每 token 激活 expert 数)</label>
+        <input type="range" id="K" min="1" max="16" step="1" value="8">
+        <div class="range-display"><span>1</span><span class="current" id="K-val">8</span><span>16</span></div>
+      </div>
+      <div class="calc-row">
+        <label>N_shared (共享 expert 数)</label>
+        <select id="Ns">
+          <option value="0">0</option>
+          <option value="1" selected>1</option>
+          <option value="2">2</option>
+        </select>
+      </div>
+      <div class="calc-row">
+        <label>d_expert (单 expert FFN 中间维度)</label>
+        <input type="range" id="De" min="256" max="4096" step="64" value="1792">
+        <div class="range-display"><span>256</span><span class="current" id="De-val">1792</span><span>4096</span></div>
+      </div>
+      <div class="calc-row">
+        <label>Vocab</label>
+        <input type="number" id="V" value="128000" step="1000">
+      </div>
+      <div class="calc-row">
+        <label>Head dim</label>
+        <input type="number" id="Hd" value="128" step="8">
+      </div>
+    </div>
+
+    <div class="calc-output">
+      <div class="big-stat">
+        <div class="big-stat-label">Total Params (含 lm_head, 不含 MTP)</div>
+        <div class="big-stat-value" id="total-val">— <span class="unit">B</span></div>
+        <div class="big-stat-delta" id="total-delta">—</div>
+      </div>
+      <div class="big-stat">
+        <div class="big-stat-label">Active 严格 / Active V3 口径</div>
+        <div class="big-stat-value">
+          <span id="active-strict">—</span>
+          <span class="unit" style="color: var(--text-soft); margin: 0 8px;">/</span>
+          <span id="active-v3">—</span>
+          <span class="unit">B</span>
+        </div>
+        <div class="big-stat-delta">Sparsity (严格): <span id="sparsity">—</span></div>
+      </div>
+
+      <div>
+        <div style="font-size: 12px; color: var(--text-soft); margin-bottom: 6px;">参数构成（Total Base）</div>
+        <div class="breakdown-bar" id="breakdown-bar"></div>
+        <div class="breakdown-legend" id="breakdown-legend"></div>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-mini">
+          <div class="stat-mini-label">L0 Dense FFN intermediate</div>
+          <div class="stat-mini-value" id="ff0">—</div>
+        </div>
+        <div class="stat-mini">
+          <div class="stat-mini-label">GQA Q / KV heads</div>
+          <div class="stat-mini-value" id="gqa">—</div>
+        </div>
+        <div class="stat-mini">
+          <div class="stat-mini-label">Attn FLOPs / token (total all layers)</div>
+          <div class="stat-mini-value" id="attn-flops">—</div>
+        </div>
+        <div class="stat-mini">
+          <div class="stat-mini-label">L/√H ratio</div>
+          <div class="stat-mini-value" id="lh-ratio">—</div>
+        </div>
+        <div class="stat-mini">
+          <div class="stat-mini-label">KV Cache @ 32K BF16</div>
+          <div class="stat-mini-value" id="kv-cache">—</div>
+        </div>
+        <div class="stat-mini">
+          <div class="stat-mini-label">Embedding 占总参</div>
+          <div class="stat-mini-value" id="emb-pct">—</div>
+        </div>
+      </div>
+
+      <div style="margin-top: 14px; font-size: 12px; color: var(--text-soft); font-style: italic;">
+        💡 公式：Total = 2×vocab×H + L0(attn+dense_FFN) + (L−1)×[attn + N_shared×3HD_e + N_routed×3HD_e]<br>
+        Active 严格 = attn × L + L0_dense_FFN + (L−1) × [N_shared + K] × 3HD_e<br>
+        Active V3 = Active 严格 + 2 × vocab × H（含 embedding + lm_head）
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 维度对比 ============ -->
+<section class="tab-section" id="compare">
+  <h2>📊 6 个维度横向对比</h2>
+  <p style="color: var(--text-soft); font-size: 14px;">每条 bar 都归一化到 baseline=100%。绿色 = 越长越好；橙色 = 越长越坏。</p>
+
+  <div style="background: var(--bg-card); padding: 18px; border-radius: 8px; border: 1px solid var(--border);">
+
+    <div class="compare-row">
+      <div class="compare-label">推理 Latency<span class="sub">越低越好（绿）</span></div>
+      <div class="compare-bars">
+        <div class="compare-bar"><span class="opt-tag" data-id="baseline">Baseline</span><div class="bar-track"><div class="bar-fill" data-id="baseline" style="width:100%; background: var(--warn)"></div></div><span class="bar-value">100% (27 步)</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="A">A</span><div class="bar-track"><div class="bar-fill" data-id="A" style="width:89%; background: var(--accent-2)"></div></div><span class="bar-value">89% (24 步)</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="B">B</span><div class="bar-track"><div class="bar-fill" data-id="B" style="width:74%; background: var(--ok)"></div></div><span class="bar-value">74% (20 步)</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="C">C</span><div class="bar-track"><div class="bar-fill" data-id="C" style="width:59%; background: var(--ok)"></div></div><span class="bar-value">59% (16 步)</span></div>
+      </div>
+    </div>
+
+    <div class="compare-row">
+      <div class="compare-label">Attention FLOPs<span class="sub">越低越好（绿）</span></div>
+      <div class="compare-bars">
+        <div class="compare-bar"><span class="opt-tag" data-id="baseline">Baseline</span><div class="bar-track"><div class="bar-fill" style="width:100%; background: var(--warn)"></div></div><span class="bar-value">100%</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="A">A</span><div class="bar-track"><div class="bar-fill" style="width:89%; background: var(--ok)"></div></div><span class="bar-value">89%</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="B">B</span><div class="bar-track"><div class="bar-fill" style="width:94%; background: var(--ok)"></div></div><span class="bar-value">94%</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="C">C</span><div class="bar-track"><div class="bar-fill" style="width:92%; background: var(--ok)"></div></div><span class="bar-value">92%</span></div>
+      </div>
+    </div>
+
+    <div class="compare-row">
+      <div class="compare-label">KV Cache (32K, BF16)<span class="sub">越低越好</span></div>
+      <div class="compare-bars">
+        <div class="compare-bar"><span class="opt-tag" data-id="baseline">Baseline</span><div class="bar-track"><div class="bar-fill" style="width:90%; background: var(--accent-2)"></div></div><span class="bar-value">864 MB</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="A">A</span><div class="bar-track"><div class="bar-fill" style="width:80%; background: var(--ok)"></div></div><span class="bar-value">768 MB</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="B">B</span><div class="bar-track"><div class="bar-fill" style="width:100%; background: var(--warn)"></div></div><span class="bar-value">960 MB</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="C">C</span><div class="bar-track"><div class="bar-fill" style="width:67%; background: var(--ok)"></div></div><span class="bar-value">640 MB</span></div>
+      </div>
+    </div>
+
+    <div class="compare-row">
+      <div class="compare-label">Depth Upscale 头空间<span class="sub">越长越好（绿）</span></div>
+      <div class="compare-bars">
+        <div class="compare-bar"><span class="opt-tag" data-id="baseline">Baseline</span><div class="bar-track"><div class="bar-fill" style="width:50%; background: var(--accent-2)"></div></div><span class="bar-value">1.5× (27→40)</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="A">A</span><div class="bar-track"><div class="bar-fill" style="width:60%; background: var(--ok)"></div></div><span class="bar-value">1.7× (24→40)</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="B">B</span><div class="bar-track"><div class="bar-fill" style="width:100%; background: var(--ok)"></div></div><span class="bar-value">2.0× (20→40)</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="C">C</span><div class="bar-track"><div class="bar-fill" style="width:100%; background: var(--ok)"></div></div><span class="bar-value">2.0× (16→32)</span></div>
+      </div>
+    </div>
+
+    <div class="compare-row">
+      <div class="compare-label">Reasoning Quality 风险<span class="sub">越低越好（绿）</span></div>
+      <div class="compare-bars">
+        <div class="compare-bar"><span class="opt-tag" data-id="baseline">Baseline</span><div class="bar-track"><div class="bar-fill" style="width:10%; background: var(--ok)"></div></div><span class="bar-value">极低</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="A">A</span><div class="bar-track"><div class="bar-fill" style="width:25%; background: var(--ok)"></div></div><span class="bar-value">低</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="B">B</span><div class="bar-track"><div class="bar-fill" style="width:50%; background: var(--accent-2)"></div></div><span class="bar-value">中（~1-2pt 风险）</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="C">C</span><div class="bar-track"><div class="bar-fill" style="width:85%; background: var(--warn)"></div></div><span class="bar-value">高（≥3pt 风险）</span></div>
+      </div>
+    </div>
+
+    <div class="compare-row">
+      <div class="compare-label">SOTA 验证成熟度<span class="sub">越长越好（绿）</span></div>
+      <div class="compare-bars">
+        <div class="compare-bar"><span class="opt-tag" data-id="baseline">Baseline</span><div class="bar-track"><div class="bar-fill" style="width:100%; background: var(--ok)"></div></div><span class="bar-value">V2-Lite, Moonlight, DSM-16B</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="A">A</span><div class="bar-track"><div class="bar-fill" style="width:15%; background: var(--warn)"></div></div><span class="bar-value">无直接同尺寸</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="B">B</span><div class="bar-track"><div class="bar-fill" style="width:50%; background: var(--accent-2)"></div></div><span class="bar-value">Ling-mini-2.0 同 L</span></div>
+        <div class="compare-bar"><span class="opt-tag" data-id="C">C</span><div class="bar-track"><div class="bar-fill" style="width:15%; background: var(--warn)"></div></div><span class="bar-value">OLMoE 同 L 但 7×小</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <h3>综合权重（按使用场景）</h3>
+  <table class="compact">
+    <thead>
+      <tr><th>场景</th><th>Baseline</th><th>Option A</th><th>Option B</th><th>Option C</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>偏 reasoning（GPQA/Math 重要）</td><td>⭐⭐⭐⭐⭐</td><td>⭐⭐⭐⭐</td><td>⭐⭐⭐</td><td>⭐⭐</td></tr>
+      <tr><td>偏 serving（low-latency 优先）</td><td>⭐⭐⭐</td><td>⭐⭐⭐⭐</td><td>⭐⭐⭐⭐⭐</td><td>⭐⭐⭐⭐⭐</td></tr>
+      <tr class="recommended-row"><td>计划未来 12 月内 upscale 到 32B+</td><td>⭐⭐⭐</td><td>⭐⭐⭐⭐</td><td>⭐⭐⭐⭐⭐</td><td>⭐⭐⭐⭐</td></tr>
+      <tr><td>第一次做 MoE、求稳</td><td>⭐⭐⭐⭐⭐</td><td>⭐⭐⭐⭐</td><td>⭐⭐⭐</td><td>⭐⭐</td></tr>
+      <tr><td>训练算力宽裕，可补救 reasoning</td><td>⭐⭐⭐⭐</td><td>⭐⭐⭐⭐</td><td>⭐⭐⭐⭐⭐</td><td>⭐⭐⭐⭐</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ Upscale 路径 ============ -->
+<section class="tab-section" id="roadmap">
+  <h2>🛤️ Upscale 路径详解</h2>
+
+  <h3>三条上扩路径（独立或组合）</h3>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 24px;">
+    <div style="background: var(--bg-card); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 6px; padding: 14px;">
+      <div style="font-weight: 700; color: var(--accent); margin-bottom: 6px;">① Depth Upscaling</div>
+      <div style="font-size: 13px; color: var(--text-soft); line-height: 1.6;">
+        <strong>方法</strong>：SOLAR-DUS / LLaMA Pro / LESA<br>
+        <strong>典型</strong>：Mistral 7B 32L → SOLAR 48L<br>
+        <strong>适合</strong>：浅起点（headroom 大）<br>
+        <strong>风险</strong>：MoE 上 SOLAR 无公开案例
+      </div>
+    </div>
+    <div style="background: var(--bg-card); border: 1px solid var(--border); border-left: 4px solid var(--accent-2); border-radius: 6px; padding: 14px;">
+      <div style="font-weight: 700; color: var(--accent-2); margin-bottom: 6px;">② Expert Upcycling</div>
+      <div style="font-size: 13px; color: var(--text-soft); line-height: 1.6;">
+        <strong>方法</strong>：Sparse Upcycling (Komatsuzaki 2023)<br>
+        <strong>典型</strong>：Mistral 7B → Mixtral 8x7B<br>
+        <strong>适合</strong>：< 1× 原 dense budget<br>
+        <strong>详见</strong>：19_sparse_upcycling.md
+      </div>
+    </div>
+    <div style="background: var(--bg-card); border: 1px solid var(--border); border-left: 4px solid var(--text-soft); border-radius: 6px; padding: 14px;">
+      <div style="font-weight: 700; color: var(--text-soft); margin-bottom: 6px;">③ Width Upscaling</div>
+      <div style="font-size: 13px; color: var(--text-soft); line-height: 1.6;">
+        <strong>方法</strong>：加 hidden + 重 init<br>
+        <strong>典型</strong>：罕见<br>
+        <strong>适合</strong>：几乎从不用<br>
+        <strong>评论</strong>：不推荐
+      </div>
+    </div>
+  </div>
+
+  <h3>Option B 的推荐 Upscale Roadmap（16B → 50B 路线）</h3>
+  <div class="roadmap">
+    <div class="stage">
+      <div class="stage-name">Stage 1 — 主训练 (Option B base)</div>
+      <div class="stage-spec">20L / hidden 2304 / N=64 / K=8 / 1 shared / d_expert=1792</div>
+      <div class="stage-spec">参数：16.3 B total / 2.49 B active</div>
+      <div class="stage-cost">训练: 12-15T tokens · ~250-400K H100-hr · ~$500-800K</div>
+    </div>
+    <div class="stage-arrow">↓</div>
+    <div class="stage" style="border-left-color: var(--accent);">
+      <div class="stage-name">SOLAR-DUS 加深 (m=4)</div>
+      <div class="stage-spec" style="color: var(--accent);">操作：复制 → 各去除中间 4 层 → 拼接 → 16+16 = 32L</div>
+      <div class="stage-spec" style="color: var(--text-soft); font-size: 11px;">⚠ MoE 上 SOLAR 没有公开案例 → 必须先在 1B/200M-active 上做 proof</div>
+    </div>
+    <div class="stage-arrow">↓</div>
+    <div class="stage" style="border-left-color: var(--accent-2);">
+      <div class="stage-name">Stage 2 — Depth-upscaled (3 个月)</div>
+      <div class="stage-spec">32L / 2304 / N=64 / K=8 / 1 shared / d_expert=1792</div>
+      <div class="stage-spec">参数：~26 B total / ~3.9 B active</div>
+      <div class="stage-cost">Continued pretrain: 3-5T tokens · ~150-250K H100-hr</div>
+    </div>
+    <div class="stage-arrow">↓</div>
+    <div class="stage" style="border-left-color: var(--ok);">
+      <div class="stage-name">Sparse Upcycling 加 expert</div>
+      <div class="stage-spec" style="color: var(--ok);">操作：每 expert 复制 2 份 + σ=0.01 噪声分化；router 全新</div>
+      <div class="stage-spec" style="color: var(--text-soft); font-size: 11px;">参考 19_sparse_upcycling.md</div>
+    </div>
+    <div class="stage-arrow">↓</div>
+    <div class="stage" style="border-left-color: var(--ok);">
+      <div class="stage-name">Stage 3 — Expert-upcycled (6 个月)</div>
+      <div class="stage-spec">32L / 2304 / N=128 / K=8 / 1 shared / d_expert=1792</div>
+      <div class="stage-spec">参数：~50 B total / ~3.9 B active</div>
+      <div class="stage-cost">Continued pretrain: 1-2T tokens · ~50-100K H100-hr</div>
+    </div>
+  </div>
+
+  <h3>Depth Upscaling 方法学（按成熟度排序）</h3>
+  <table class="compact">
+    <thead>
+      <tr><th>方法</th><th>年代</th><th>机制</th><th>成熟度</th><th>MoE 验证</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>SOLAR-DUS</strong> (Upstage)</td><td>2023-12</td><td>复制 → 去除 m 层 → 拼接</td><td>⭐⭐⭐⭐⭐ dense</td><td>无</td></tr>
+      <tr><td>LLaMA Pro Block Expansion</td><td>2024-01</td><td>插入恒等映射新层</td><td>⭐⭐⭐⭐</td><td>无</td></tr>
+      <tr><td>LESA (Learnable Layer Scaling)</td><td>2025-08</td><td>meta-net 学习如何加层</td><td>⭐⭐</td><td>无</td></tr>
+      <tr><td>Depth Tiling (Rae 2021)</td><td>2021</td><td>简单复制层堆叠</td><td>⭐ 过时</td><td>无</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ 决策树 ============ -->
+<section class="tab-section" id="decision">
+  <h2>🎯 互动决策树</h2>
+  <p style="color: var(--text-soft); font-size: 14px;">回答 4 个问题，自动给出推荐配置。</p>
+
+  <div class="decision-tree">
+    <div class="question" data-q="1">
+      <div class="question-text"><span class="q-num">1</span>产品最看重的下游能力是什么？</div>
+      <div class="answer-row">
+        <button class="answer-btn" data-q="1" data-v="reasoning">Reasoning (数学 / 代码 / 逻辑)</button>
+        <button class="answer-btn" data-q="1" data-v="serving">Serving (低 latency / 多 QPS)</button>
+        <button class="answer-btn" data-q="1" data-v="balanced">通用对话 / 平衡</button>
+      </div>
+    </div>
+
+    <div class="question" data-q="2">
+      <div class="question-text"><span class="q-num">2</span>未来 12 个月内会做 model upscale 吗？（指扩到 30B+ 或加 expert）</div>
+      <div class="answer-row">
+        <button class="answer-btn" data-q="2" data-v="yes-aggressive">会 — 计划翻倍以上 (16B → 50B+)</button>
+        <button class="answer-btn" data-q="2" data-v="yes-mild">会 — 小幅扩 (16B → 25-30B)</button>
+        <button class="answer-btn" data-q="2" data-v="no">暂无 upscale 计划</button>
+      </div>
+    </div>
+
+    <div class="question" data-q="3">
+      <div class="question-text"><span class="q-num">3</span>可以接受 reasoning quality 比 baseline 减 1-2pt 吗？</div>
+      <div class="answer-row">
+        <button class="answer-btn" data-q="3" data-v="yes">可以 — 有补救手段（mid-training / RL）</button>
+        <button class="answer-btn" data-q="3" data-v="no">不能 — quality 是硬要求</button>
+      </div>
+    </div>
+
+    <div class="question" data-q="4">
+      <div class="question-text"><span class="q-num">4</span>团队对 MoE 训练 ops 的熟悉度？</div>
+      <div class="answer-row">
+        <button class="answer-btn" data-q="4" data-v="expert">熟手 — 训过 ≥ 1 个 MoE</button>
+        <button class="answer-btn" data-q="4" data-v="learner">学习中 — 第一个 MoE</button>
+      </div>
+    </div>
+
+    <div class="recommendation-box" id="recommendation">
+      <span class="rec-label">推荐</span>
+      <div class="rec-name" id="rec-name">请回答上面 4 个问题…</div>
+      <div class="rec-detail" id="rec-detail">每选一个，推荐会实时更新。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 风险与下一步 ============ -->
+<section class="tab-section" id="risks">
+  <h2>⚠️ 风险登记 & 实施 checklist</h2>
+
+  <h3>关键风险与缓解</h3>
+  <table class="compact">
+    <thead>
+      <tr><th>风险</th><th>概率</th><th>影响</th><th>缓解</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Option B 在 GPQA / Math 上输 baseline ≥ 2pt</td><td><span class="risk-tag risk-med">中</span></td><td><span class="risk-tag risk-med">中</span></td><td>A2 T2.6 验证；准备 fallback 到 Option A (24L)</td></tr>
+      <tr><td>SOLAR-DUS 在 MoE 上没公开案例 → upscale 翻车</td><td><span class="risk-tag risk-med">中</span></td><td><span class="risk-tag risk-high">高</span></td><td>Stage 2 启动前先 1B/200M-active 跑 SOLAR proof</td></tr>
+      <tr><td>加宽 hidden 后 RoPE base 需要调（128K 外推）</td><td><span class="risk-tag risk-low">低</span></td><td><span class="risk-tag risk-low">低</span></td><td>hidden 2304 与 Qwen3-30B 同；RoPE base=1e6 不变</td></tr>
+      <tr><td>Attention head 数变化（16→18→20）训练不稳</td><td><span class="risk-tag risk-low">低</span></td><td><span class="risk-tag risk-med">中</span></td><td>A0/A1 sanity 阶段就发现</td></tr>
+      <tr><td>Embedding 占总参比例上升（4.4%→5.7%）</td><td><span class="risk-tag risk-low">低</span></td><td><span class="risk-tag risk-low">低</span></td><td>接受，现代 MoE 主流比例</td></tr>
+      <tr><td>Continued pretrain budget 总成本超预算</td><td><span class="risk-tag risk-med">中</span></td><td><span class="risk-tag risk-med">中</span></td><td>Upscale roadmap 列入但 release 不绑定</td></tr>
+      <tr><td>"Depth Delusion" 论文结论在 MoE 不成立</td><td><span class="risk-tag risk-med">中</span></td><td><span class="risk-tag risk-med">中</span></td><td>A2 T2.6 直接验证；不依赖 paper 间接证据</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Wind Tunnel A2 新增 T2.6 消融</h3>
+  <p>把 depth-width 加入现有 A2 实验矩阵，新增 4 个 arms（成本 ~80 H100-hr）：</p>
+  <table class="compact">
+    <thead>
+      <tr><th>Arm</th><th>A2 配置 (1B/200M-active)</th><th>对应 16B Profile</th><th>预期</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>A</strong> (baseline)</td><td>12L / 1024 / d=704</td><td>Baseline 27L/2048</td><td>quality 上限参考</td></tr>
+      <tr><td><strong>B</strong> (Option A 缩)</td><td>11L / 1024 / d=832</td><td>Option A 24L/2048</td><td>温和短宽</td></tr>
+      <tr class="recommended-row"><td><strong>C</strong> (Option B 缩)</td><td>10L / 1152 / d=896</td><td>Option B 20L/2304</td><td>关键候选</td></tr>
+      <tr><td><strong>D</strong> (Option C 缩)</td><td>8L / 1280 / d=1024</td><td>Option C 16L/2560</td><td>激进探索</td></tr>
+    </tbody>
+  </table>
+
+  <h3>实施 checklist</h3>
+  <table class="compact">
+    <thead><tr><th>步骤</th><th>内容</th><th>负责</th><th>时长</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>22_FINAL §11 把 Layers 范围从 22-32 改为 <strong>18-30</strong>；Hidden 范围 2048-2304 → <strong>2048-2560</strong></td><td>spec 负责人</td><td>30 分钟</td></tr>
+      <tr><td>2</td><td>22_FINAL §11 "强默认但 pilot 必测" 列表新增 <strong>"Depth-Width Tradeoff（A2 T2.6）"</strong></td><td>spec 负责人</td><td>15 分钟</td></tr>
+      <tr><td>3</td><td>22_FINAL 末尾添加 §12 <strong>"Upscale Roadmap"</strong>（3 阶段：base → SOLAR-DUS → Expert Upcycle）</td><td>spec 负责人</td><td>1 小时</td></tr>
+      <tr><td>4</td><td>29_wind_tunnel_a2 添加 T2.6（4 arms），更新总 arm 数 27 → 31，预算 580 → 660 H100-hr</td><td>research</td><td>1 小时</td></tr>
+      <tr><td>5</td><td>A2 T2.6 实施：4 arms × 21 H100-hr，约 1 整 8-H100 节点 1 天</td><td>infra</td><td>1 天</td></tr>
+      <tr><td>6</td><td>T2.6 决策会：根据 loss + downstream 决定是否切 Option B 为主 spec</td><td>research</td><td>0.5 天</td></tr>
+      <tr><td>7</td><td>（若 T2.6 通过）22_FINAL §2 Profile B 表更新：L 27→20, H 2048→2304, d_expert 1408→1792</td><td>spec 负责人</td><td>30 分钟</td></tr>
+      <tr><td>8</td><td>（可选）28_open_source_moe_catalog 把 Option B 加入"特殊设计"作为 16B 短宽路线 anchor</td><td>research</td><td>30 分钟</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Open Questions（A3 / 未来研究接力）</h3>
+  <ol>
+    <li><strong>MoE 上 SOLAR-DUS 的 router 行为</strong>：dense SOLAR 把 layer 拼接后 router 怎么变？复制的 layer 共享 router 还是各自重训？— 无公开案例，需要自己验证</li>
+    <li><strong>Ling-mini-2.0 选 20L 的官方理由</strong>：Ling 团队没正式 paper 说明，可能纯工程原因（PP 友好），也可能有质量考量 — 待社区询问</li>
+    <li><strong>"Depth Delusion" 是否成立 in MoE</strong>：那篇 paper 用 dense；MoE 的 router + expert 加深机制可能不同</li>
+    <li><strong>Option B 在 long-context (128K+) 是否 underperform</strong>：浅模型在长上下文 retrieval 上可能弱（attention 深度对 long-range 重要）→ A3 阶段做 needle-in-haystack 验证</li>
+  </ol>
+
+  <h3>参考资料</h3>
+  <ul style="font-size: 13px; color: var(--text-soft);">
+    <li><a href="https://arxiv.org/abs/2312.15166" target="_blank">SOLAR 10.7B (arXiv 2312.15166)</a> — Upstage 提出 Depth Up-Scaling</li>
+    <li><a href="https://aclanthology.org/2024.naacl-industry.3/" target="_blank">SOLAR NAACL 2024</a> — 工业 track 发表</li>
+    <li><a href="https://aclanthology.org/2025.acl-long.1095.pdf" target="_blank">LESA: Learnable LLM Layer Scaling-Up (ACL 2025)</a></li>
+    <li><a href="https://www.arxiv.org/pdf/2601.20994" target="_blank">The Depth Delusion (arXiv 2601.20994, 2026)</a> — deep 不如 wide 的争议证据</li>
+    <li><a href="https://arxiv.org/pdf/2508.06617" target="_blank">Generalizing Scaling Laws for Dense and Sparse LLMs (arXiv 2508.06617)</a></li>
+    <li>本仓库 <code>papers/32_depth_width_tradeoff.md</code> — 完整 markdown 版</li>
+    <li>本仓库 <code>papers/19_sparse_upcycling.md</code> — expert 路径 upscale</li>
+    <li>本仓库 <code>papers/29_wind_tunnel_a2.md</code> — wind tunnel 设计</li>
+  </ul>
+</section>
+
+<footer>
+  回到 <a href="index.html">📖 论文笔记索引</a> · <a href="concepts.html">📚 概念学习</a><br>
+  本页基于 papers/32_depth_width_tradeoff.md
+</footer>
+
+</main>
+
+<script>
+// ========== Tab switching ==========
+document.querySelectorAll('.tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.tab-section').forEach((s) => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+    window.scrollTo(0, 0);
+  });
+});
+
+// ========== Theme toggle ==========
+document.getElementById('themeBtn').addEventListener('click', () => {
+  const cur = document.body.getAttribute('data-theme');
+  document.body.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+});
+
+// ========== Calculator ==========
+const PRESETS = {
+  'baseline': { L: 27, H: 2048, Nr: 64, K: 8, Ns: 1, De: 1408 },
+  'A':        { L: 24, H: 2048, Nr: 64, K: 8, Ns: 1, De: 1664 },
+  'B':        { L: 20, H: 2304, Nr: 64, K: 8, Ns: 1, De: 1792 },
+  'C':        { L: 16, H: 2560, Nr: 64, K: 8, Ns: 1, De: 2048 }
+};
+const BASELINE_TOTAL = 15.5e9;
+const BASELINE_ACTIVE_STRICT = 2.40e9;
+
+function computeParams(p) {
+  const L = p.L, H = p.H, Nr = p.Nr, K = p.K, Ns = p.Ns, De = p.De;
+  const vocab = p.V, head_dim = p.Hd;
+  const num_q = Math.round(H / head_dim);
+  const num_kv = Math.max(1, Math.round(num_q / 4));
+
+  // Attention params per layer (GQA, with bias=0 simplification)
+  // Q: H × num_q × head_dim = H × H_q_out, K/V: H × num_kv × head_dim, O: H × H
+  const H_q_out = num_q * head_dim;
+  const H_kv_out = num_kv * head_dim;
+  const attn = H * H_q_out + H * H_kv_out + H * H_kv_out + H_q_out * H;
+  // = 2*H*H_q_out + 2*H*H_kv_out
+  // For standard H (H = num_q*head_dim), simplifies to 2.5 H^2 when 4:1 GQA
+
+  // L0 dense FFN intermediate ≈ H × 5.4, round to multiple of 64
+  const ff0_int = Math.round(H * 5.4 / 64) * 64;
+  const L0_FFN = 3 * H * ff0_int;
+
+  // MoE layer FFN
+  const shared_FFN = Ns * 3 * H * De;
+  const routed_all = Nr * 3 * H * De;
+  const routed_active = K * 3 * H * De;
+
+  const embedding = vocab * H;
+  const lm_head = vocab * H;
+
+  const L_MoE = L - 1;
+  const total = embedding + lm_head +
+                attn + L0_FFN +
+                L_MoE * (attn + shared_FFN + routed_all);
+  const active_strict = attn + L0_FFN +
+                        L_MoE * (attn + shared_FFN + routed_active);
+  const active_v3 = active_strict + embedding + lm_head;
+
+  // KV cache @ 32K BF16
+  const kv_cache_bytes = 2 * L * num_kv * head_dim * 32768 * 2;
+  const kv_cache_mb = kv_cache_bytes / 1024 / 1024;
+
+  // Attention FLOPs/token total all layers (approximate, 4*H^2 per attn + 4*H*seq for softmax/score)
+  const attn_flops_per_layer = 4 * H * H + 4 * H * 4096; // 4K seq during training
+  const attn_flops_total = L * attn_flops_per_layer;
+
+  // L/sqrt(H) ratio
+  const lh_ratio = (L / Math.sqrt(H)).toFixed(2);
+
+  return {
+    total, active_strict, active_v3,
+    embedding, lm_head, L0_FFN, attn_per_layer: attn,
+    shared_FFN_per_layer: shared_FFN, routed_all_per_layer: routed_all,
+    routed_active_per_layer: routed_active,
+    num_q, num_kv, ff0_int,
+    kv_cache_mb, attn_flops_total, lh_ratio,
+    L_MoE
+  };
+}
+
+function fmtB(n) {
+  if (n < 1e9) return (n / 1e6).toFixed(1) + ' M';
+  return (n / 1e9).toFixed(2);
+}
+function fmtM(n) {
+  return (n / 1e6).toFixed(0) + ' M';
+}
+
+function updateCalc() {
+  const p = {
+    L: parseInt(document.getElementById('L').value),
+    H: parseInt(document.getElementById('H').value),
+    Nr: parseInt(document.getElementById('Nr').value),
+    K: parseInt(document.getElementById('K').value),
+    Ns: parseInt(document.getElementById('Ns').value),
+    De: parseInt(document.getElementById('De').value),
+    V: parseInt(document.getElementById('V').value) || 128000,
+    Hd: parseInt(document.getElementById('Hd').value) || 128
+  };
+  document.getElementById('L-val').textContent = p.L;
+  document.getElementById('K-val').textContent = p.K;
+  document.getElementById('De-val').textContent = p.De;
+
+  const r = computeParams(p);
+
+  // Big stat: total
+  document.getElementById('total-val').innerHTML = fmtB(r.total) + ' <span class="unit">B</span>';
+  const totalDelta = ((r.total - BASELINE_TOTAL) / BASELINE_TOTAL * 100).toFixed(1);
+  const totalDeltaEl = document.getElementById('total-delta');
+  totalDeltaEl.textContent = `vs baseline 15.5B: ${totalDelta >= 0 ? '+' : ''}${totalDelta}%`;
+  totalDeltaEl.className = 'big-stat-delta ' + (totalDelta >= 0 ? 'up' : 'down');
+
+  // Active
+  document.getElementById('active-strict').textContent = fmtB(r.active_strict);
+  document.getElementById('active-v3').textContent = fmtB(r.active_v3);
+  const sparsity = r.active_strict / r.total;
+  document.getElementById('sparsity').textContent = '1 / ' + (1 / sparsity).toFixed(1) + ' = ' + (sparsity * 100).toFixed(1) + '%';
+
+  // Breakdown bar
+  const segments = [
+    { label: 'Embedding', value: r.embedding + r.lm_head, color: '#5ec8ff' },
+    { label: 'Attention (全层)', value: r.attn_per_layer * p.L, color: '#fbbf24' },
+    { label: 'L0 Dense FFN', value: r.L0_FFN, color: '#c084fc' },
+    { label: 'Shared Experts', value: r.shared_FFN_per_layer * r.L_MoE, color: '#7bd88f' },
+    { label: 'Routed Experts (全部)', value: r.routed_all_per_layer * r.L_MoE, color: '#f472b6' }
+  ];
+  const total = r.total;
+  const barEl = document.getElementById('breakdown-bar');
+  barEl.innerHTML = segments.map((s) => {
+    const pct = (s.value / total * 100).toFixed(1);
+    if (pct < 1) return '';
+    return `<div class="breakdown-seg" style="width:${pct}%; background:${s.color}" title="${s.label}: ${fmtB(s.value)} B (${pct}%)">${pct > 6 ? pct + '%' : ''}</div>`;
+  }).join('');
+  document.getElementById('breakdown-legend').innerHTML = segments.map((s) => {
+    const pct = (s.value / total * 100).toFixed(1);
+    return `<span><span class="dot" style="background:${s.color}"></span>${s.label} (${pct}%)</span>`;
+  }).join('');
+
+  // Mini stats
+  document.getElementById('ff0').textContent = r.ff0_int.toLocaleString();
+  document.getElementById('gqa').textContent = `${r.num_q} Q / ${r.num_kv} KV`;
+  const attnFlopsG = r.attn_flops_total / 1e9;
+  document.getElementById('attn-flops').textContent = attnFlopsG.toFixed(1) + ' GFLOPs (4K)';
+  document.getElementById('lh-ratio').textContent = r.lh_ratio;
+  document.getElementById('kv-cache').textContent = r.kv_cache_mb.toFixed(0) + ' MB';
+  document.getElementById('emb-pct').textContent = ((r.embedding + r.lm_head) / r.total * 100).toFixed(1) + ' %';
+}
+
+function loadPreset(name) {
+  const p = PRESETS[name];
+  document.getElementById('L').value = p.L;
+  document.getElementById('H').value = p.H;
+  document.getElementById('Nr').value = p.Nr;
+  document.getElementById('K').value = p.K;
+  document.getElementById('Ns').value = p.Ns;
+  document.getElementById('De').value = p.De;
+  updateCalc();
+}
+
+['L', 'H', 'Nr', 'K', 'Ns', 'De', 'V', 'Hd'].forEach((id) => {
+  document.getElementById(id).addEventListener('input', updateCalc);
+  document.getElementById(id).addEventListener('change', updateCalc);
+});
+document.querySelectorAll('.preset-btn').forEach((btn) => {
+  btn.addEventListener('click', () => loadPreset(btn.dataset.preset));
+});
+
+// Initial load
+loadPreset('B');
+
+// ========== Decision tree ==========
+const answers = {};
+document.querySelectorAll('.answer-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const q = btn.dataset.q;
+    const v = btn.dataset.v;
+    // unhighlight siblings
+    document.querySelectorAll(`.answer-btn[data-q="${q}"]`).forEach((b) => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    answers[q] = v;
+    updateRecommendation();
+  });
+});
+
+function updateRecommendation() {
+  const a1 = answers['1'], a2 = answers['2'], a3 = answers['3'], a4 = answers['4'];
+  if (!a1 || !a2 || !a3 || !a4) {
+    document.getElementById('rec-name').textContent = '请回答上面 ' + (4 - Object.keys(answers).length) + ' 个问题…';
+    document.getElementById('rec-detail').textContent = '每选一个，推荐会实时更新。';
+    return;
+  }
+
+  // Score each option
+  const scores = { baseline: 0, A: 0, B: 0, C: 0 };
+
+  // Q1: 取向
+  if (a1 === 'reasoning') { scores.baseline += 3; scores.A += 2; scores.B += 1; scores.C += 0; }
+  else if (a1 === 'serving') { scores.baseline += 0; scores.A += 1; scores.B += 3; scores.C += 3; }
+  else { scores.baseline += 2; scores.A += 2; scores.B += 2; scores.C += 1; }
+
+  // Q2: upscale 计划
+  if (a2 === 'yes-aggressive') { scores.baseline += 0; scores.A += 1; scores.B += 3; scores.C += 3; }
+  else if (a2 === 'yes-mild') { scores.baseline += 1; scores.A += 2; scores.B += 3; scores.C += 2; }
+  else { scores.baseline += 3; scores.A += 2; scores.B += 1; scores.C += 0; }
+
+  // Q3: quality 风险接受度
+  if (a3 === 'yes') { scores.baseline += 1; scores.A += 2; scores.B += 3; scores.C += 2; }
+  else { scores.baseline += 3; scores.A += 2; scores.B += 0; scores.C += -2; }
+
+  // Q4: 团队成熟度
+  if (a4 === 'expert') { scores.baseline += 1; scores.A += 2; scores.B += 3; scores.C += 2; }
+  else { scores.baseline += 3; scores.A += 2; scores.B += 1; scores.C += -1; }
+
+  // Find winner
+  let best = 'baseline', bestScore = -Infinity;
+  Object.keys(scores).forEach((k) => {
+    if (scores[k] > bestScore) { bestScore = scores[k]; best = k; }
+  });
+
+  const REC_NAMES = {
+    'baseline': 'Baseline · 27L / 2048 / d_expert=1408',
+    'A': 'Option A · 24L / 2048 / d_expert=1664',
+    'B': 'Option B · 20L / 2304 / d_expert=1792 ⭐',
+    'C': 'Option C · 16L / 2560 / d_expert=2048'
+  };
+  const REC_DETAILS = {
+    'baseline': '保守稳妥 — V2-Lite / Moonlight 路线，业界 16B 主流。Quality 上限高，但 upscale 时只有 1.5× headroom。建议你的场景下不需要冒险。',
+    'A': '温和短宽 — Layer 减 11%，hidden 不变，d_expert 加宽。Quality 风险低，upscale 头空间小幅改善（1.7×）。没有直接 16B 同尺寸 SOTA 验证。',
+    'B': '推荐配置 — Ling-mini-2.0 (20L) 验证过这个层数；加宽 hidden 2304 把参数补回。Latency 减 26%，attention FLOPs 不增反降 (0.94×)，upscale 头空间 2.0×。Reasoning 有 ~1-2pt 风险，但 mid-training / RL 可补救。是 wind tunnel A2 T2.6 主要候选。',
+    'C': '激进短宽 — 把 Option B 思路推到极致。Latency 减 41%，但 reasoning 风险高（≥ 3pt），且 16B 量级没有直接 SOTA 验证（OLMoE 是 6.9B / 1.3B 小 7×）。建议仅作为 Profile R 极端探索。'
+  };
+  document.getElementById('rec-name').textContent = REC_NAMES[best];
+  document.getElementById('rec-detail').innerHTML = REC_DETAILS[best] +
+    `<br><br><span style="font-size:11px; color: var(--text-soft);">评分细节: Baseline ${scores.baseline} / A ${scores.A} / B ${scores.B} / C ${scores.C}</span>`;
+}
+
+</script>
+</body>
+</html>
