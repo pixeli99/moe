@@ -103,21 +103,6 @@ ANCHORS = {
         mtp_depth=1, mtp_is_moe=False,
         notes="Reasoning-focused; 27T tokens; sequence aux 1e-5. KV=8 inferred from active=15B",
     ),
-    "dots3": MoEArchSpec(
-        name="Dots3 (295B/15B, Hybrid + MLA+MTP, approximate)",
-        # Source: xlsx; rednote next-gen; xlsx "num_q=256" likely refers to
-        # Q-promoted MLA dim, not actual head count. KV=8 GQA inferred to match active 15B.
-        hidden=5120, num_layers=46, head_dim=128,
-        num_q_heads=40, num_kv_heads=8,   # inferred (256 in xlsx likely means Q-promote 256×128 in MLA)
-        attn_type="gqa",                   # treat as GQA approximation
-        n_routed=256, top_k=8, n_shared=1, d_expert=1536,
-        first_k_dense=1, dense_intermediate=13824,
-        vocab_size=152064, tied_embedding=False,
-        mtp_depth=1, mtp_is_moe=False,
-        notes="⚠️ Approximate. xlsx says 'num_q=256, mla 128 swa 192' which is unclear; "
-              "we model as GQA 40Q/8KV to match active=15B. Hybrid attn layout not modeled.",
-    ),
-
     # ─────────────────── 100B segment ───────────────────
     "ling-flash-2": MoEArchSpec(
         name="Ling-flash-2.0 (103B/6.1B)",

@@ -199,6 +199,78 @@ header {
 }
 #mla-fields .field input { background: var(--panel); }
 
+#hybrid-editor {
+  margin-top: 8px;
+  padding: 10px;
+  background: var(--accent-soft);
+  border-radius: 6px;
+  border-left: 2px solid var(--accent-line);
+}
+.hybrid-editor-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-bottom: 8px;
+}
+.hybrid-editor-head .badge { margin-left: 0; }
+.mini-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 26px; height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.mini-btn:hover { border-color: var(--accent-line); color: var(--accent); }
+.mini-btn.danger:hover { border-color: rgba(220, 38, 38, 0.35); color: var(--err); }
+.hybrid-edit-list {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.hybrid-edit-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 28px;
+  gap: 6px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.hybrid-cell {
+  min-width: 0;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.hybrid-cell label {
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.hybrid-cell input,
+.hybrid-cell select {
+  width: 100%;
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  padding: 5px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+}
+.hybrid-cell input:focus,
+.hybrid-cell select:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.hybrid-remove {
+  align-self: end;
+  width: 26px; min-width: 26px;
+  padding: 0;
+}
+
 /* ────────── Output Pane ────────── */
 .output-pane {
   display: flex; flex-direction: column; gap: 16px;
@@ -509,6 +581,14 @@ body.dark .tab-btn.active { background: var(--accent-soft); }
         <div class="field"><label>qk_rope_dim</label><input type="number" id="qk_rope_head_dim" value="64"></div>
         <div class="field"><label>v_head_dim</label><input type="number" id="v_head_dim" value="128"></div>
       </div>
+      <div class="field-checkbox"><label>Hybrid schedule</label><input type="checkbox" id="hybrid_enabled"></div>
+      <div id="hybrid-editor" hidden>
+        <div class="hybrid-editor-head">
+          <span class="badge" id="hybrid-count-badge">0 / 0</span>
+          <button type="button" class="mini-btn" id="hybrid-add" title="Add layer type">+</button>
+        </div>
+        <div class="hybrid-edit-list" id="hybrid-editor-rows"></div>
+      </div>
     </div>
 
     <div class="group">
@@ -817,6 +897,11 @@ function computeAll(spec) {
   // Invariants
   const checks = [];
   if (spec.hybrid_attn && spec.hybrid_attn.length > 0) {
+    const hybridLayerCount = spec.hybrid_attn.reduce((acc, [count]) => acc + count, 0);
+    checks.push({name: "Hybrid layer count = Layers",
+      ok: hybridLayerCount === L,
+      msg: `${hybridLayerCount} scheduled vs L=${L}`,
+      sev: hybridLayerCount === L ? "ok" : "err"});
     for (const [count, ls] of spec.hybrid_attn) {
       if (ls.kind === "softmax" || ls.kind === "swa") {
         const qTotal = ls.num_q_heads * ls.head_dim;
@@ -899,9 +984,6 @@ const ANCHORS = {
   "mimo-v2-flash": {name:"MiMo-V2-Flash 309B (15B, Hybrid SWA+GA)", hidden:4096, num_layers:48, head_dim:192,
     num_q_heads:64, num_kv_heads:8, attn_type:"gqa", n_routed:256, top_k:8, n_shared:0, d_expert:2048,
     first_k_dense:1, dense_intermediate:16384, vocab_size:128256, mtp_depth:1, mtp_is_moe:false},
-  "dots3": {name:"Dots3 (295B/15B, approximate)", hidden:5120, num_layers:46, head_dim:128,
-    num_q_heads:40, num_kv_heads:8, attn_type:"gqa", n_routed:256, top_k:8, n_shared:1, d_expert:1536,
-    first_k_dense:1, dense_intermediate:13824, vocab_size:152064, mtp_depth:1, mtp_is_moe:false},
   "ling-mini-2": {name:"Ling-mini-2.0 (16B/1.4B)", hidden:2048, num_layers:20, head_dim:128,
     num_q_heads:16, num_kv_heads:4, attn_type:"gqa", n_routed:256, top_k:8, n_shared:1, d_expert:512,
     first_k_dense:1, dense_intermediate:5120, vocab_size:157184, mtp_depth:0, mtp_is_moe:false},
@@ -971,6 +1053,139 @@ const FIELDS = [
   "kv_seq_len","hbm_bw","bw_frac","mtp_accept","train_tokens_t","num_gpus","price_per_hour","mfu",
 ];
 
+function readNumber(id, fallback=0) {
+  const el = document.getElementById(id);
+  if (!el) return fallback;
+  const v = parseFloat(el.value);
+  return Number.isFinite(v) ? v : fallback;
+}
+
+function cloneHybridAttn(rows) {
+  return rows ? rows.map(([count, layer]) => [Number(count) || 0, {...layer}]) : [];
+}
+
+function defaultHybridLayer(kind="softmax") {
+  return {
+    kind,
+    num_q_heads: readNumber("num_q_heads", 32),
+    num_kv_heads: readNumber("num_kv_heads", 8),
+    head_dim: readNumber("head_dim", 128),
+    window_size: kind === "swa" ? 512 : undefined,
+    linear_num_value_heads: kind === "linear" ? readNumber("num_q_heads", 32) : undefined,
+    linear_value_head_dim: kind === "linear" ? readNumber("head_dim", 128) : undefined,
+    conv_kernel: kind === "linear" ? 4 : undefined,
+    state_dim: kind === "mamba" ? 16 : undefined,
+  };
+}
+
+function normalizeHybridLayer(layer) {
+  const base = defaultHybridLayer(layer.kind || "softmax");
+  const out = {...base, ...layer};
+  out.num_q_heads = Number(out.num_q_heads) || base.num_q_heads;
+  out.num_kv_heads = Number(out.num_kv_heads) || base.num_kv_heads;
+  out.head_dim = Number(out.head_dim) || base.head_dim;
+  if (out.kind === "swa") out.window_size = Number(out.window_size) || 512;
+  if (out.kind === "linear") {
+    out.linear_num_value_heads = Number(out.linear_num_value_heads) || out.num_q_heads;
+    out.linear_value_head_dim = Number(out.linear_value_head_dim) || out.head_dim;
+    out.conv_kernel = Number(out.conv_kernel) || 0;
+  }
+  if (out.kind === "mamba") out.state_dim = Number(out.state_dim) || 16;
+  return out;
+}
+
+function hybridCell(label, key, value, type="number", options=[]) {
+  const input = type === "select"
+    ? `<select data-key="${key}">${options.map(o => `<option value="${o}" ${o === value ? "selected" : ""}>${o}</option>`).join("")}</select>`
+    : `<input type="number" data-key="${key}" value="${value}">`;
+  return `<div class="hybrid-cell"><label>${label}</label>${input}</div>`;
+}
+
+function renderHybridRow(row, idx) {
+  const [count, rawLayer] = row;
+  const layer = normalizeHybridLayer(rawLayer);
+  const cells = [
+    hybridCell("layers", "count", count),
+    hybridCell("kind", "kind", layer.kind, "select", ["softmax", "swa", "linear", "mamba"]),
+  ];
+  if (layer.kind !== "mamba") {
+    cells.push(
+      hybridCell("q", "num_q_heads", layer.num_q_heads),
+      hybridCell("kv", "num_kv_heads", layer.num_kv_heads),
+      hybridCell("dim", "head_dim", layer.head_dim),
+    );
+  }
+  if (layer.kind === "swa") cells.push(hybridCell("window", "window_size", layer.window_size || 512));
+  if (layer.kind === "linear") {
+    cells.push(
+      hybridCell("v heads", "linear_num_value_heads", layer.linear_num_value_heads || layer.num_q_heads),
+      hybridCell("v dim", "linear_value_head_dim", layer.linear_value_head_dim || layer.head_dim),
+      hybridCell("conv", "conv_kernel", layer.conv_kernel || 0),
+    );
+  }
+  if (layer.kind === "mamba") cells.push(hybridCell("state", "state_dim", layer.state_dim || 16));
+  return `<div class="hybrid-edit-row" data-index="${idx}">
+    ${cells.join("")}
+    <button type="button" class="mini-btn danger hybrid-remove" title="Remove layer type">×</button>
+  </div>`;
+}
+
+function readHybridEditorRows(includeZero=false) {
+  const enabled = document.getElementById("hybrid_enabled").checked;
+  if (!enabled) return [];
+  const rows = [];
+  document.querySelectorAll(".hybrid-edit-row").forEach(row => {
+    const get = key => row.querySelector(`[data-key="${key}"]`);
+    const count = parseFloat(get("count")?.value) || 0;
+    const kind = get("kind")?.value || "softmax";
+    const layer = {kind};
+    if (kind !== "mamba") {
+      layer.num_q_heads = parseFloat(get("num_q_heads")?.value) || 0;
+      layer.num_kv_heads = parseFloat(get("num_kv_heads")?.value) || 0;
+      layer.head_dim = parseFloat(get("head_dim")?.value) || 0;
+    }
+    if (kind === "swa") layer.window_size = parseFloat(get("window_size")?.value) || 0;
+    if (kind === "linear") {
+      layer.linear_num_value_heads = parseFloat(get("linear_num_value_heads")?.value) || 0;
+      layer.linear_value_head_dim = parseFloat(get("linear_value_head_dim")?.value) || 0;
+      layer.conv_kernel = parseFloat(get("conv_kernel")?.value) || 0;
+    }
+    if (kind === "mamba") layer.state_dim = parseFloat(get("state_dim")?.value) || 0;
+    if (includeZero || count > 0) rows.push([count, normalizeHybridLayer(layer)]);
+  });
+  return rows;
+}
+
+function updateHybridCountBadge(rows) {
+  const badge = document.getElementById("hybrid-count-badge");
+  const total = (rows || []).reduce((acc, [count]) => acc + (Number(count) || 0), 0);
+  const layers = readNumber("num_layers", 0);
+  badge.textContent = `${total} / ${layers}`;
+  badge.style.background = total === layers ? "var(--ok-bg)" : "var(--warn-bg)";
+  badge.style.color = total === layers ? "var(--ok)" : "var(--warn)";
+}
+
+function renderHybridEditor() {
+  const enabled = document.getElementById("hybrid_enabled").checked;
+  const editor = document.getElementById("hybrid-editor");
+  editor.hidden = !enabled;
+  if (!enabled) {
+    updateHybridCountBadge([]);
+    return;
+  }
+  const rows = cloneHybridAttn(window._hybridAttn || []);
+  document.getElementById("hybrid-editor-rows").innerHTML =
+    rows.map((row, idx) => renderHybridRow(row, idx)).join("");
+  updateHybridCountBadge(rows);
+}
+
+function syncHybridFromEditor() {
+  const rows = readHybridEditorRows(true);
+  window._hybridAttn = rows;
+  updateHybridCountBadge(rows);
+  return rows;
+}
+
 function readSpec() {
   const s = {};
   for (const f of FIELDS) {
@@ -980,7 +1195,8 @@ function readSpec() {
     else if (el.type === "number") s[f] = parseFloat(el.value) || 0;
     else s[f] = el.value;
   }
-  if (window._hybridAttn) s.hybrid_attn = window._hybridAttn;
+  const hybridRows = readHybridEditorRows(false);
+  if (hybridRows.length > 0) s.hybrid_attn = hybridRows;
   if (window._presetName) s.name = window._presetName;
   if (s.attn_type !== "mla") { s.q_lora_rank = 0; s.kv_lora_rank = 0; }
   return s;
@@ -998,8 +1214,10 @@ function loadPreset(name) {
   }
   if (!a.q_lora_rank) document.getElementById("q_lora_rank").value = 0;
   if (!a.kv_lora_rank) document.getElementById("kv_lora_rank").value = 0;
-  window._hybridAttn = a.hybrid_attn || null;
+  window._hybridAttn = cloneHybridAttn(a.hybrid_attn);
+  document.getElementById("hybrid_enabled").checked = window._hybridAttn.length > 0;
   toggleMLA();
+  renderHybridEditor();
   compute();
 }
 
@@ -1254,8 +1472,53 @@ function init() {
   });
   for (const f of FIELDS) {
     const el = document.getElementById(f);
-    if (el) el.addEventListener("input", () => { window._presetName = null; compute(); });
+    if (el) el.addEventListener("input", () => {
+      window._presetName = null;
+      if (f === "num_layers") updateHybridCountBadge(readHybridEditorRows(true));
+      compute();
+    });
   }
+  document.getElementById("hybrid_enabled").addEventListener("change", e => {
+    window._presetName = null;
+    if (e.target.checked && (!window._hybridAttn || window._hybridAttn.length === 0)) {
+      window._hybridAttn = [[readNumber("num_layers", 1), defaultHybridLayer("softmax")]];
+    }
+    if (!e.target.checked) window._hybridAttn = [];
+    renderHybridEditor();
+    compute();
+  });
+  document.getElementById("hybrid-add").addEventListener("click", () => {
+    window._presetName = null;
+    document.getElementById("hybrid_enabled").checked = true;
+    const rows = syncHybridFromEditor();
+    const used = rows.reduce((acc, [count]) => acc + count, 0);
+    const remaining = readNumber("num_layers", 1) - used;
+    rows.push([remaining > 0 ? remaining : 1, defaultHybridLayer("softmax")]);
+    window._hybridAttn = rows;
+    renderHybridEditor();
+    compute();
+  });
+  document.getElementById("hybrid-editor-rows").addEventListener("input", () => {
+    window._presetName = null;
+    syncHybridFromEditor();
+    compute();
+  });
+  document.getElementById("hybrid-editor-rows").addEventListener("change", e => {
+    window._presetName = null;
+    syncHybridFromEditor();
+    if (e.target.dataset.key === "kind") renderHybridEditor();
+    compute();
+  });
+  document.getElementById("hybrid-editor-rows").addEventListener("click", e => {
+    if (!e.target.classList.contains("hybrid-remove")) return;
+    window._presetName = null;
+    const idx = Number(e.target.closest(".hybrid-edit-row").dataset.index);
+    const rows = readHybridEditorRows(true);
+    rows.splice(idx, 1);
+    window._hybridAttn = rows;
+    renderHybridEditor();
+    compute();
+  });
   cmpA.addEventListener("change", compute);
   cmpB.addEventListener("change", compute);
 
