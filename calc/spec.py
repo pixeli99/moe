@@ -15,7 +15,92 @@ from dataclasses import dataclass, field
 from typing import Literal, Optional
 
 AttnType = Literal["mha", "gqa", "mla"]
+AttnKind = Literal["softmax", "swa", "linear", "mamba"]
 DTypeBytes = {"bf16": 2, "fp16": 2, "fp8": 1, "fp32": 4, "int8": 1, "int4": 0.5}
+
+
+@dataclass
+class AttnLayerSpec:
+    """Per-layer attention spec for hybrid models.
+
+    Use cases:
+      - Step 3.5 Flash: alternating SWA (W=512) and Full softmax layers
+      - Qwen3-Next: alternating Gated DeltaNet (linear) and Gated Attention
+      - Jamba / Granite 4: Mamba state-space layers mixed with softmax
+    """
+    kind: AttnKind = "softmax"
+    num_q_heads: int = 32
+    num_kv_heads: int = 8
+    head_dim: int = 128
+
+    # SWA-specific
+    window_size: Optional[int] = None  # e.g. 512 for Step 3.5 Flash
+
+    # Linear attention specific (Gated DeltaNet)
+    linear_value_head_dim: Optional[int] = None
+    linear_num_value_heads: Optional[int] = None
+    conv_kernel: int = 0  # 1D conv kernel before linear attention
+
+    # Mamba state dim (rough approximation)
+    state_dim: Optional[int] = None
+
+    def params(self, hidden: int) -> int:
+        """Per-layer attention parameter count."""
+        if self.kind in ("softmax", "swa"):
+            q = hidden * self.num_q_heads * self.head_dim
+            k = hidden * self.num_kv_heads * self.head_dim
+            v = hidden * self.num_kv_heads * self.head_dim
+            o = self.num_q_heads * self.head_dim * hidden
+            return q + k + v + o
+        elif self.kind == "linear":
+            v_heads = self.linear_num_value_heads or self.num_q_heads
+            v_d = self.linear_value_head_dim or self.head_dim
+            q = hidden * self.num_q_heads * self.head_dim
+            k = hidden * self.num_kv_heads * self.head_dim
+            v = hidden * v_heads * v_d
+            o = v_heads * v_d * hidden
+            gate = hidden * v_heads * v_d  # output gate
+            conv = hidden * self.conv_kernel  # 1D conv weights
+            return q + k + v + o + gate + conv
+        elif self.kind == "mamba":
+            # Approximate: Mamba ≈ 3× hidden² + state contribution
+            return 3 * hidden * hidden + hidden * (self.state_dim or 16) * 2
+        return 0
+
+    def kv_cache_bytes_at_ctx(self, ctx: int, dtype_bytes: float) -> int:
+        """KV cache or state memory at the given context length."""
+        if self.kind == "softmax":
+            return int(2 * self.num_kv_heads * self.head_dim * dtype_bytes * ctx)
+        elif self.kind == "swa":
+            eff = min(ctx, self.window_size or ctx)
+            return int(2 * self.num_kv_heads * self.head_dim * dtype_bytes * eff)
+        elif self.kind == "linear":
+            v_heads = self.linear_num_value_heads or self.num_q_heads
+            v_d = self.linear_value_head_dim or self.head_dim
+            return int(self.num_kv_heads * v_heads * v_d * dtype_bytes)
+        elif self.kind == "mamba":
+            return int((self.state_dim or 16) * dtype_bytes * 2)
+        return 0
+
+    def attn_quadratic_flops(self, seq_len: int) -> int:
+        """Attention quadratic compute (QK^T + softmax + V) per layer.
+
+        For SWA, capped at window_size.
+        For linear/mamba, this is O(d²) not O(N²) — return small constant × N.
+        """
+        if self.kind == "softmax":
+            return 2 * 2 * self.num_q_heads * self.head_dim * seq_len * seq_len
+        elif self.kind == "swa":
+            eff = min(seq_len, self.window_size or seq_len)
+            return 2 * 2 * self.num_q_heads * self.head_dim * seq_len * eff
+        elif self.kind == "linear":
+            v_d = self.linear_value_head_dim or self.head_dim
+            # Linear attention: O(N × d_k × d_v) instead of O(N²)
+            return 2 * self.num_q_heads * self.head_dim * v_d * seq_len
+        elif self.kind == "mamba":
+            # State-space: O(N × hidden × state) — approximate
+            return 2 * seq_len * (self.state_dim or 16) * 8  # rough
+        return 0
 
 
 @dataclass
@@ -80,6 +165,11 @@ class MoEArchSpec:
     mtp_depth: int = 0                      # 0 means no MTP
     mtp_is_moe: bool = True                 # V3 style; LongCat / Step set False
 
+    # Hybrid attention layer schedule
+    # If set, list of (count, AttnLayerSpec) tuples whose counts sum to num_layers.
+    # Overrides the uniform num_q_heads/num_kv_heads/attn_type fields above.
+    hybrid_attn: Optional[list[tuple[int, AttnLayerSpec]]] = None
+
     # Notes
     notes: str = ""
 
@@ -91,15 +181,32 @@ class MoEArchSpec:
             assert self.kv_lora_rank, "MLA needs kv_lora_rank"
             assert self.qk_nope_head_dim and self.qk_rope_head_dim, "MLA needs qk_nope/rope dims"
             assert self.v_head_dim, "MLA needs v_head_dim"
+        if self.hybrid_attn is not None:
+            total_count = sum(c for c, _ in self.hybrid_attn)
+            assert total_count == self.num_layers, (
+                f"hybrid_attn counts sum to {total_count}, but num_layers={self.num_layers}"
+            )
 
     # ---------------------- Parameter accounting ----------------------
+
+    def attn_params_total(self) -> int:
+        """Total attention params summed across all layers (hybrid-aware)."""
+        if self.hybrid_attn is not None:
+            return sum(count * spec.params(self.hidden) for count, spec in self.hybrid_attn)
+        return self.attn_params_per_layer() * self.num_layers
 
     def attn_params_per_layer(self) -> int:
         """Per-layer attention params (no bias).
 
+        For hybrid: returns weighted AVERAGE across layer types.
+        For uniform: returns single-layer count.
+
         GQA/MHA: Q + K + V + O projection.
         MLA: q_lora down + q_lora up + kv down (kv_a) + k_pe + kv up + O.
         """
+        if self.hybrid_attn is not None:
+            return self.attn_params_total() // self.num_layers
+
         h = self.hidden
         if self.attn_type in ("mha", "gqa"):
             q = h * self.num_q_heads * self.head_dim
@@ -172,11 +279,11 @@ class MoEArchSpec:
         return self.mtp_depth * per_module
 
     def params_breakdown(self) -> dict[str, int]:
-        """Detailed per-module total params."""
+        """Detailed per-module total params (hybrid-aware on attention)."""
         n_moe_layers = self.num_layers - self.first_k_dense
         out = {
             "embedding": self.embedding_params(),
-            "attn_total": self.attn_params_per_layer() * self.num_layers,
+            "attn_total": self.attn_params_total(),  # hybrid-aware
             "dense_ffn": self.ffn_dense_per_layer() * self.first_k_dense,
             "moe_ffn_routed": self.n_routed * 3 * self.hidden * self.d_expert * n_moe_layers,
             "moe_ffn_shared": self.n_shared * 3 * self.hidden * self.d_expert * n_moe_layers,
@@ -206,7 +313,7 @@ class MoEArchSpec:
         """
         n_moe = self.num_layers - self.first_k_dense
         a = {
-            "attn": self.attn_params_per_layer() * self.num_layers,
+            "attn": self.attn_params_total(),  # hybrid-aware
             "dense_ffn": self.ffn_dense_per_layer() * self.first_k_dense,
             "moe_active": self.ffn_moe_active_per_layer() * n_moe,
             "router": self.router_per_layer() * n_moe,  # small but counted
@@ -239,14 +346,24 @@ class MoEArchSpec:
     # ---------------------- KV cache ----------------------
 
     def kv_cache_bytes_per_token_per_layer(self, dtype: str = "bf16") -> int:
-        """Per-token, per-layer KV cache bytes."""
+        """Per-token, per-layer KV cache bytes (uniform; not for hybrid)."""
         b = DTypeBytes[dtype]
         if self.attn_type == "mla":
-            # MLA caches latent c^KV and k_pe only
             return int((self.kv_lora_rank + self.qk_rope_head_dim) * b)
         return int(2 * self.num_kv_heads * self.head_dim * b)
 
     def kv_cache_bytes_total(self, seq_len: int, batch: int = 1, dtype: str = "bf16") -> int:
+        """Total KV cache bytes across ALL layers at given context length.
+
+        Hybrid-aware: SWA layers cap at window size; linear/Mamba layers have
+        fixed state size (independent of seq_len).
+        """
+        b = DTypeBytes[dtype]
+        if self.hybrid_attn is not None:
+            total = 0
+            for count, layer_spec in self.hybrid_attn:
+                total += count * layer_spec.kv_cache_bytes_at_ctx(seq_len, b)
+            return total * batch
         per = self.kv_cache_bytes_per_token_per_layer(dtype)
         return per * seq_len * batch * self.num_layers
 
@@ -365,12 +482,18 @@ class MoEArchSpec:
         active = self.active_params(include_embedding=True)
         proj_flops = 2 * active * n
 
-        # Attention quadratic
-        if self.attn_type == "mla":
-            head_d = self.qk_nope_head_dim + self.qk_rope_head_dim
+        # Attention quadratic (hybrid-aware: SWA caps at window, linear is O(N))
+        if self.hybrid_attn is not None:
+            attn_quad = sum(
+                count * layer_spec.attn_quadratic_flops(n)
+                for count, layer_spec in self.hybrid_attn
+            )
         else:
-            head_d = self.head_dim
-        attn_quad = 2 * self.num_q_heads * head_d * n * n * self.num_layers
+            if self.attn_type == "mla":
+                head_d = self.qk_nope_head_dim + self.qk_rope_head_dim
+            else:
+                head_d = self.head_dim
+            attn_quad = 2 * self.num_q_heads * head_d * n * n * self.num_layers
 
         total_flops = proj_flops + attn_quad
         effective_flops_per_sec = gpu_peak_tflops * 1e12 * mfu
@@ -520,11 +643,21 @@ class MoEArchSpec:
         lines = [
             f"═══ {self.name} ═══",
             f"  Backbone:  {self.num_layers}L × hidden {self.hidden} ({self.first_k_dense} dense + {self.num_layers - self.first_k_dense} MoE)",
-            f"  Attention: {self.attn_type.upper()} {self.num_q_heads}Q/{self.num_kv_heads}KV head_dim {self.head_dim}",
         ]
-        if self.attn_type == "mla":
-            lines.append(f"             MLA: q_lora={self.q_lora_rank}, kv_lora={self.kv_lora_rank}, "
-                         f"qk_nope={self.qk_nope_head_dim}, qk_rope={self.qk_rope_head_dim}, v={self.v_head_dim}")
+        if self.hybrid_attn is not None:
+            lines.append(f"  Attention: HYBRID")
+            for count, ls in self.hybrid_attn:
+                extra = ""
+                if ls.kind == "swa":
+                    extra = f" W={ls.window_size}"
+                elif ls.kind == "linear":
+                    extra = f" linear K={ls.linear_num_value_heads or ls.num_q_heads}h×{ls.linear_value_head_dim or ls.head_dim}d"
+                lines.append(f"             {count}× {ls.kind:>7s} {ls.num_q_heads}Q/{ls.num_kv_heads}KV d={ls.head_dim}{extra}")
+        else:
+            lines.append(f"  Attention: {self.attn_type.upper()} {self.num_q_heads}Q/{self.num_kv_heads}KV head_dim {self.head_dim}")
+            if self.attn_type == "mla":
+                lines.append(f"             MLA: q_lora={self.q_lora_rank}, kv_lora={self.kv_lora_rank}, "
+                             f"qk_nope={self.qk_nope_head_dim}, qk_rope={self.qk_rope_head_dim}, v={self.v_head_dim}")
         lines.append(
             f"  MoE:       {self.n_routed} routed + {self.n_shared} shared, K={self.top_k}, d_expert={self.d_expert}"
         )
@@ -547,10 +680,15 @@ class MoEArchSpec:
         lines.append(f"     Attn:FFN per layer   1:{1/self.attn_ffn_ratio():.2f}")
         lines.append("")
         lines.append("  ── KV cache (BF16) ──")
-        per = self.kv_cache_bytes_per_token_per_layer("bf16")
-        lines.append(f"     per token per layer: {per} B")
-        total_kv = self.kv_cache_bytes_total(32768, 1, "bf16")
-        lines.append(f"     32K ctx, batch=1:    {total_kv/1024/1024:.0f} MB")
-        total_kv = self.kv_cache_bytes_total(128 * 1024, 1, "bf16")
-        lines.append(f"     128K ctx, batch=1:   {total_kv/1024/1024/1024:.2f} GB")
+        if self.hybrid_attn is None:
+            per = self.kv_cache_bytes_per_token_per_layer("bf16")
+            lines.append(f"     per token per layer: {per} B")
+        total_kv_32k = self.kv_cache_bytes_total(32768, 1, "bf16")
+        total_kv_128k = self.kv_cache_bytes_total(128 * 1024, 1, "bf16")
+        total_kv_1m = self.kv_cache_bytes_total(1024 * 1024, 1, "bf16")
+        lines.append(f"     32K ctx, batch=1:    {total_kv_32k/1024/1024:.0f} MB")
+        lines.append(f"     128K ctx, batch=1:   {total_kv_128k/1024/1024/1024:.2f} GB")
+        lines.append(f"     1M ctx, batch=1:     {total_kv_1m/1024/1024/1024:.2f} GB")
+        if self.hybrid_attn is not None:
+            lines.append(f"     (hybrid: SWA layers capped at window; linear/mamba use fixed state)")
         return "\n".join(lines)

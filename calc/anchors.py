@@ -11,7 +11,7 @@ is provided; calc.py does NOT model hybrid attention explicitly.
 
 Sources cited inline.
 """
-from .spec import MoEArchSpec
+from .spec import MoEArchSpec, AttnLayerSpec
 
 
 ANCHORS = {
@@ -159,6 +159,57 @@ ANCHORS = {
         vocab_size=156000, tied_embedding=False,
         mtp_depth=1, mtp_is_moe=False,
         notes="Largest FP8 base. Paper: arXiv 2510.22115",
+    ),
+
+    # ─────────────────── Hybrid attention (2025-2026) ───────────────────
+    "step-3.5-flash": MoEArchSpec(
+        name="Step 3.5 Flash (196.81B/11B, SWA:Full 3:1 hybrid)",
+        # Source: arXiv 2602.10604 §2.2 + Table on page 6
+        # 45L = 3 dense + 42 MoE; attention pattern: 1 leading Full + 11 × (3 SWA + 1 Full)
+        # = 12 Full + 33 SWA = 45 attention layers (Augmented SWA: 96Q vs Full 64Q)
+        hidden=5120,  # inferred from "5120 hidden" mention in paper
+        num_layers=45, head_dim=128,
+        num_q_heads=64, num_kv_heads=8,  # nominal Full-attn config (overridden by hybrid_attn)
+        attn_type="gqa",
+        hybrid_attn=[
+            (12, AttnLayerSpec(kind="softmax", num_q_heads=64, num_kv_heads=8, head_dim=128)),
+            (33, AttnLayerSpec(kind="swa", num_q_heads=96, num_kv_heads=8, head_dim=128,
+                               window_size=512)),
+        ],
+        n_routed=288, top_k=8, n_shared=1, d_expert=1024,  # reverse-engineered from 196.81B total / 11B active
+        first_k_dense=3, dense_intermediate=9216,  # = 9 × 1024 (compute-equivalent)
+        vocab_size=131072, tied_embedding=False,
+        mtp_depth=3, mtp_is_moe=False,  # Step uses 3 dense MTP heads
+        notes="Hybrid SWA+Full; Augmented 96Q SWA heads; Head-wise Gated Attention. "
+              "Paper: arXiv 2602.10604. d_expert=1024 reverse-engineered (paper omits).",
+    ),
+    "qwen3-next": MoEArchSpec(
+        name="Qwen3-Next-80B (80B/3B, DeltaNet:Attn 3:1 hybrid)",
+        # Source: HF config Qwen/Qwen3-Next-80B-A3B-Instruct
+        # 48L = 12 × (3 Gated DeltaNet + 1 Gated Attention)
+        # = 36 DeltaNet (linear) + 12 Full attention
+        hidden=2048,
+        num_layers=48, head_dim=256,  # head_dim 256 for Full attn
+        num_q_heads=16, num_kv_heads=2,  # Full attn config
+        attn_type="gqa",
+        hybrid_attn=[
+            (36, AttnLayerSpec(
+                kind="linear",
+                num_q_heads=16, num_kv_heads=16, head_dim=128,  # linear_key_head_dim
+                linear_num_value_heads=32, linear_value_head_dim=128,
+                conv_kernel=4,
+            )),
+            (12, AttnLayerSpec(
+                kind="softmax",
+                num_q_heads=16, num_kv_heads=2, head_dim=256,
+            )),
+        ],
+        n_routed=512, top_k=10, n_shared=1, d_expert=512,
+        first_k_dense=0, dense_intermediate=5632,  # only relevant if first_k_dense > 0
+        vocab_size=151936, tied_embedding=False,
+        mtp_depth=1, mtp_is_moe=False,
+        notes="Hybrid 3:1 DeltaNet (linear) + Full softmax. head_dim=256 reverse default. "
+              "Zero-centered weight-decayed layernorm. 1M ctx via YaRN.",
     ),
 
     # ─────────────────── Legacy / reference points ───────────────────
