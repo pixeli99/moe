@@ -83,23 +83,40 @@ class AttnLayerSpec:
         return 0
 
     def attn_quadratic_flops(self, seq_len: int) -> int:
-        """Attention quadratic compute (QK^T + softmax + V) per layer.
+        """TOTAL prefill attention compute (QK^T + softmax + V) over N tokens.
 
-        For SWA, capped at window_size.
-        For linear/mamba, this is O(d²) not O(N²) — return small constant × N.
+        Coefficient 4 = 2 (QK^T multiply-add) + 2 (Attn × V multiply-add).
+        For SWA, capped at window_size. For linear/mamba, O(N) not O(N²).
         """
         if self.kind == "softmax":
-            return 2 * 2 * self.num_q_heads * self.head_dim * seq_len * seq_len
+            return 4 * self.num_q_heads * self.head_dim * seq_len * seq_len
         elif self.kind == "swa":
             eff = min(seq_len, self.window_size or seq_len)
-            return 2 * 2 * self.num_q_heads * self.head_dim * seq_len * eff
+            return 4 * self.num_q_heads * self.head_dim * seq_len * eff
         elif self.kind == "linear":
             v_d = self.linear_value_head_dim or self.head_dim
             # Linear attention: O(N × d_k × d_v) instead of O(N²)
             return 2 * self.num_q_heads * self.head_dim * v_d * seq_len
         elif self.kind == "mamba":
-            # State-space: O(N × hidden × state) — approximate
-            return 2 * seq_len * (self.state_dim or 16) * 8  # rough
+            return 2 * seq_len * (self.state_dim or 16) * 8
+        return 0
+
+    def attn_per_token_flops(self, ctx_len: int) -> int:
+        """Per-token decode-style attention compute (this token vs past ctx_len).
+
+        Coefficient 4 = same QK + AV breakdown but only for 1 query.
+        SWA caps at window. Linear is O(d²) constant per token.
+        """
+        if self.kind == "softmax":
+            return 4 * self.num_q_heads * self.head_dim * ctx_len
+        elif self.kind == "swa":
+            eff = min(ctx_len, self.window_size or ctx_len)
+            return 4 * self.num_q_heads * self.head_dim * eff
+        elif self.kind == "linear":
+            v_d = self.linear_value_head_dim or self.head_dim
+            return 2 * self.num_q_heads * self.head_dim * v_d
+        elif self.kind == "mamba":
+            return 16 * (self.state_dim or 16)
         return 0
 
 
@@ -370,15 +387,25 @@ class MoEArchSpec:
     # ---------------------- FLOPs ----------------------
 
     def per_token_forward_flops(self, seq_len: int = 4096) -> int:
-        """Approx forward FLOPs per token. Includes attention quadratic term."""
-        h = self.hidden
-        # Projection FLOPs (linear): 2 × params for forward (multiply-add counted as 2)
-        attn_proj = 2 * self.attn_params_per_layer() * self.num_layers
-        # Attention QK^T + softmax + V mul: 2 × num_q_heads × head_dim × seq_len × 2 per token
-        if self.attn_type == "mla":
-            attn_qk = 2 * 2 * self.num_q_heads * (self.qk_nope_head_dim + self.qk_rope_head_dim) * seq_len * self.num_layers
+        """Approximate per-token forward FLOPs (decode-style: this token vs ctx).
+
+        Hybrid-aware: each AttnLayerSpec contributes its own quadratic term.
+        """
+        # Projection FLOPs (linear): 2 × params for forward
+        attn_proj = 2 * self.attn_params_total()  # hybrid-aware
+
+        # Attention QK + AV (per token, this token vs seq_len past)
+        if self.hybrid_attn is not None:
+            attn_qk = sum(
+                count * ls.attn_per_token_flops(seq_len)
+                for count, ls in self.hybrid_attn
+            )
         else:
-            attn_qk = 2 * 2 * self.num_q_heads * self.head_dim * seq_len * self.num_layers
+            if self.attn_type == "mla":
+                head_d = self.qk_nope_head_dim + self.qk_rope_head_dim
+            else:
+                head_d = self.head_dim
+            attn_qk = 4 * self.num_q_heads * head_d * seq_len * self.num_layers
 
         n_moe = self.num_layers - self.first_k_dense
         ffn_active = 2 * (
@@ -386,13 +413,23 @@ class MoEArchSpec:
             self.ffn_moe_active_per_layer() * n_moe +
             self.router_per_layer() * n_moe
         )
-        # Embedding lookup is O(1), output projection counted via lm_head (= embedding shape)
         lm_head = 2 * self.vocab_size * self.hidden
         return attn_proj + attn_qk + ffn_active + lm_head
 
     def training_flops(self, train_tokens: int) -> int:
-        """Total training FLOPs ≈ 6 × active params × tokens (forward + backward + activations)."""
-        return 6 * self.active_params() * train_tokens
+        """Total training FLOPs ≈ 6 × (active + lm_head + MTP) × tokens.
+
+        Includes:
+        - active params (strict): attn, dense_ffn, moe_active, router
+        - LM head projection (vocab × hidden, fires per token)
+        - MTP modules (trained alongside main model in V3/Ling/Step)
+
+        Excludes embedding lookup (O(1) memory, not compute).
+        """
+        lm_head = self.vocab_size * self.hidden
+        mtp = self.mtp_params()  # full MTP modules trained per step
+        total_train_active = self.active_params(include_embedding=False) + lm_head + mtp
+        return 6 * total_train_active * train_tokens
 
     def training_cost(
         self,
@@ -549,24 +586,28 @@ class MoEArchSpec:
                 ))
 
         # 3. dense_intermediate = (K + N_sh) × d_expert (compute-equivalent)
-        expected = (self.top_k + self.n_shared) * self.d_expert
-        deviation = abs(self.dense_intermediate - expected) / expected
-        checks.append(CheckResult(
-            "dense_int = (K+N_sh) × d_expert",
-            deviation < 0.05,
-            f"dense_int={self.dense_intermediate}, expected={expected}, dev={deviation*100:.1f}%",
-            "warn" if deviation >= 0.05 else "info",
-        ))
+        # Only applicable if there ARE dense layers
+        if self.first_k_dense > 0:
+            expected = (self.top_k + self.n_shared) * self.d_expert
+            deviation = abs(self.dense_intermediate - expected) / expected
+            checks.append(CheckResult(
+                "dense_int = (K+N_sh) × d_expert",
+                deviation < 0.05,
+                f"dense_int={self.dense_intermediate}, expected={expected}, dev={deviation*100:.1f}%",
+                "warn" if deviation >= 0.05 else "info",
+            ))
 
-        # 4. Attn:FFN ≈ 1:2 (V3 派 100B+ convention)
+        # 4. Attn:FFN ≈ 1:2 (V3 派 100B+ convention; hybrid models exempt)
         ratio = self.attn_ffn_ratio()
         # 1:2 means ratio = 0.5; allow 0.3-0.7 as "in band"
         in_band = 0.30 <= ratio <= 0.70
+        is_hybrid = self.hybrid_attn is not None
         checks.append(CheckResult(
-            "Attn:FFN ratio in 1:2 band (0.3 ≤ r ≤ 0.7)",
-            in_band,
-            f"attn/ffn = 1:{1/ratio:.2f} (r={ratio:.3f})",
-            "warn" if not in_band else "info",
+            "Attn:FFN ratio in 1:2 band (V3 派 convention)",
+            in_band or is_hybrid,
+            f"attn/ffn = 1:{1/ratio:.2f} (r={ratio:.3f})"
+            + (" — hybrid model exempt (SWA/linear layers cheap, more attn budget OK)" if is_hybrid else ""),
+            "info" if (in_band or is_hybrid) else "warn",
         ))
 
         # 5. d_expert / hidden ≈ 0.30 (V3 派 convention for K=9)

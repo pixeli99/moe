@@ -30,40 +30,68 @@ def scale_down(
     N_routed fixed (preserving sparsity/granularity), we scale each of the
     other 3 dims by cube-root: c = scale_factor^(1/3).
 
-    For scale_factor = 0.05 (20× smaller, e.g. 100B → 5B):
-      c = 0.05^(1/3) ≈ 0.368
-      hidden 4096 → 1536, layers 32 → 12, d_expert 2048 → 768
+    Critical alignments:
+      - hidden is aligned to head_dim so num_q_heads × head_dim == hidden exactly
+      - For hybrid models, each AttnLayerSpec's heads are also scaled by
+        hidden_ratio so Q-promote relationships are preserved
+      - d_expert is aligned to 32 for EP-friendliness
+      - num_layers is rescaled by cube-root, with hybrid layer counts
+        proportionally rescaled to sum exactly to new num_layers
 
-    N_routed, K, N_shared, attn_type, head_dim, vocab — all PRESERVED.
+    N_routed, K, N_shared, attn_type, head_dim, vocab — PRESERVED.
     """
-    import math
     c = scale_factor ** (1/3)
 
-    new_hidden = max(256, round(base.hidden * c / 64) * 64)  # 64-aligned
+    head_dim = base.head_dim
+    # Align hidden to head_dim (not 64) so q_heads × head_dim == hidden exactly
+    new_hidden = max(head_dim, round(base.hidden * c / head_dim) * head_dim)
     new_layers = max(6, round(base.num_layers * c))
     new_d_expert = max(128, round(base.d_expert * c / 32) * 32)
 
-    # Re-derive Q/KV heads to keep head_dim and Q:KV ratio (or MLA shape)
+    hidden_ratio = new_hidden / base.hidden
+
+    # Re-derive Q/KV heads
     if base.attn_type in ("mha", "gqa"):
         gqa_ratio = max(1, base.num_q_heads // base.num_kv_heads)
-        new_q = max(1, new_hidden // base.head_dim)
+        new_q = new_hidden // head_dim  # exact since hidden is head_dim-aligned
         new_kv = max(1, new_q // gqa_ratio)
-    else:  # MLA — keep heads proportional
-        new_q = max(4, round(base.num_q_heads * c))
+    else:  # MLA — scale heads by hidden_ratio
+        new_q = max(4, round(base.num_q_heads * hidden_ratio))
         new_kv = new_q
 
-    # Rescale hybrid_attn if present (largest-remainder so counts sum == new_layers)
+    # Rescale hybrid_attn: layer counts AND each layer's heads
     new_hybrid = None
     if base.hybrid_attn:
         L = base.num_layers
-        raw = [(c * new_layers / L, ls) for c, ls in base.hybrid_attn]
+        # Step 1: rescale layer counts (largest-remainder so sum == new_layers)
+        raw = [(cnt * new_layers / L, ls) for cnt, ls in base.hybrid_attn]
         floors = [(int(v), v - int(v), ls) for v, ls in raw]
         leftover = new_layers - sum(f for f, _, _ in floors)
         order = sorted(range(len(floors)), key=lambda i: -floors[i][1])
         counts = [f for f, _, _ in floors]
         for i in order[:leftover]:
             counts[i] += 1
-        new_hybrid = [(counts[i], floors[i][2]) for i in range(len(floors)) if counts[i] > 0]
+
+        # Step 2: also scale each AttnLayerSpec's heads by hidden_ratio
+        new_hybrid = []
+        for i, (cnt, _, ls) in enumerate(floors):
+            new_cnt = counts[i]
+            if new_cnt == 0:
+                continue
+            scaled_q = max(1, round(ls.num_q_heads * hidden_ratio))
+            scaled_kv = max(1, round(ls.num_kv_heads * hidden_ratio))
+            # Scale linear-attn value heads too if applicable
+            scaled_lv_heads = (
+                max(1, round(ls.linear_num_value_heads * hidden_ratio))
+                if ls.linear_num_value_heads else None
+            )
+            new_ls = replace(
+                ls,
+                num_q_heads=scaled_q,
+                num_kv_heads=scaled_kv,
+                linear_num_value_heads=scaled_lv_heads,
+            )
+            new_hybrid.append((new_cnt, new_ls))
 
     return replace(
         base,

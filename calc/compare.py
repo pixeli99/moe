@@ -14,12 +14,35 @@ def _fmt(n):
 
 def compare_specs(*specs: MoEArchSpec) -> str:
     """Side-by-side comparison table."""
+    def _attn_label(s):
+        if s.hybrid_attn:
+            return "hybrid (" + ", ".join(f"{c}×{ls.kind}" for c, ls in s.hybrid_attn) + ")"
+        return s.attn_type
+
+    def _qkv_label(s):
+        if s.hybrid_attn:
+            return "(hybrid; see Attn type row)"
+        return f"{s.num_q_heads}/{s.num_kv_heads}"
+
+    def _headdim_label(s):
+        if s.hybrid_attn:
+            dims = sorted(set(ls.head_dim for _, ls in s.hybrid_attn))
+            return "/".join(str(d) for d in dims)
+        return s.head_dim
+
+    def _kv_per_tok_label(s):
+        if s.hybrid_attn:
+            # Show effective KV per token at large ctx (no SWA capping)
+            total = s.kv_cache_bytes_total(1, 1, "bf16")  # per token = bytes at ctx=1
+            return f"{total} (mixed)"
+        return s.kv_cache_bytes_per_token_per_layer("bf16") * s.num_layers
+
     rows = [
         ("Layers", lambda s: s.num_layers),
         ("Hidden", lambda s: s.hidden),
-        ("Attn type", lambda s: s.attn_type),
-        ("Q / KV heads", lambda s: f"{s.num_q_heads}/{s.num_kv_heads}"),
-        ("head_dim", lambda s: s.head_dim),
+        ("Attn type", _attn_label),
+        ("Q / KV heads", _qkv_label),
+        ("head_dim", _headdim_label),
         ("N_routed", lambda s: s.n_routed),
         ("Top-K", lambda s: s.top_k),
         ("N_shared", lambda s: s.n_shared),
@@ -38,9 +61,9 @@ def compare_specs(*specs: MoEArchSpec) -> str:
         ("d_expert/hidden", lambda s: s.d_expert_over_hidden()),
         ("Attn:FFN ratio", lambda s: f"1:{1/s.attn_ffn_ratio():.2f}"),
         ("───────────", lambda s: ""),
-        ("KV/tok/layer (B)", lambda s: s.kv_cache_bytes_per_token_per_layer("bf16")),
         ("KV @ 32K BF16 (MB)", lambda s: s.kv_cache_bytes_total(32768, 1, "bf16") / 1024 / 1024),
         ("KV @ 128K BF16 (GB)", lambda s: s.kv_cache_bytes_total(128*1024, 1, "bf16") / 1024**3),
+        ("KV @ 1M BF16 (GB)", lambda s: s.kv_cache_bytes_total(1024*1024, 1, "bf16") / 1024**3),
     ]
 
     name_w = 22

@@ -20,7 +20,7 @@ from .anchors import ANCHORS, get_anchor, list_anchors
 
 
 def _parse_flags(argv: list[str], start: int, flags: dict) -> dict:
-    """Robust flag parser with bounds checking.
+    """Robust flag parser with bounds checking + unknown-flag detection.
 
     Args:
         argv: full argv
@@ -28,13 +28,17 @@ def _parse_flags(argv: list[str], start: int, flags: dict) -> dict:
         flags: dict mapping flag name (e.g. "--gpus") to (kwarg_name, converter)
                 e.g. {"--gpus": ("num_gpus", int), "--mfu": ("mfu", float)}
 
-    Returns: kwargs dict. Exits with error if a flag lacks a value.
+    Returns: kwargs dict. Exits with error if a flag lacks a value or is unknown.
     """
     out = {}
     i = start
     while i < len(argv):
         a = argv[i]
-        if a in flags:
+        if a.startswith("--"):
+            if a not in flags:
+                known = ", ".join(sorted(flags))
+                print(f"Error: unknown flag '{a}'. Known: {known}", file=sys.stderr)
+                sys.exit(1)
             if i + 1 >= len(argv):
                 print(f"Error: flag '{a}' requires a value", file=sys.stderr)
                 sys.exit(1)
@@ -46,6 +50,7 @@ def _parse_flags(argv: list[str], start: int, flags: dict) -> dict:
                 sys.exit(1)
             i += 2
         else:
+            # Non-flag positional — skip (caller already consumed positionals)
             i += 1
     return out
 from .compare import compare_specs, summary_table

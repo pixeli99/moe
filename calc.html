@@ -433,9 +433,11 @@ function computeAll(spec) {
   const timeSec = totalFlopsPrefill / (gpuPeakTflops * 1e12 * prefillMfu);
   const prefillTps = n / timeSec;
 
-  // Training cost
+  // Training cost — include lm_head + MTP module (active strict alone misses ~15-25%)
   const trainTokens = (spec.train_tokens_t || 20) * 1e12;
-  const trainFlops = 6 * activeStrict * trainTokens;
+  const lmHeadParams = spec.vocab_size * h;
+  const totalTrainActive = activeStrict + lmHeadParams + mtpParams;
+  const trainFlops = 6 * totalTrainActive * trainTokens;
   const trainSec = trainFlops / (gpuPeakTflops * 1e12 * spec.mfu);
   const trainDays = trainSec / spec.num_gpus / 86400;
   const trainCost = trainSec / 3600 * spec.price_per_hour;
@@ -474,22 +476,24 @@ function computeAll(spec) {
       });
     }
   }
-  const denseExpected = (spec.top_k + spec.n_shared) * spec.d_expert;
-  const denseDev = Math.abs(denseInt - denseExpected) / denseExpected;
-  checks.push({
-    name: "dense_int = (K+N_sh) × d_expert",
-    ok: denseDev < 0.05,
-    msg: `dense_int=${denseInt}, expected=${denseExpected}, dev=${(denseDev*100).toFixed(1)}%`,
-    sev: denseDev < 0.05 ? "ok" : "warn"
-  });
+  // dense_int invariant: only check if there ARE dense layers
+  if (spec.first_k_dense > 0) {
+    const denseExpected = (spec.top_k + spec.n_shared) * spec.d_expert;
+    const denseDev = Math.abs(denseInt - denseExpected) / denseExpected;
+    checks.push({
+      name: "dense_int = (K+N_sh) × d_expert",
+      ok: denseDev < 0.05,
+      msg: `dense_int=${denseInt}, expected=${denseExpected}, dev=${(denseDev*100).toFixed(1)}%`,
+      sev: denseDev < 0.05 ? "ok" : "warn"
+    });
+  }
   const r = attnFfnRatio;
   const inBand = r >= 0.30 && r <= 0.70;
-  // Hybrid models have different convention
   const isHybrid = spec.hybrid_attn && spec.hybrid_attn.length > 0;
   checks.push({
-    name: "Attn:FFN per layer (V3 派 1:2 band)",
-    ok: inBand || isHybrid,  // hybrid is exempt
-    msg: `attn/ffn = 1:${(1/r).toFixed(2)} (r=${r.toFixed(3)})${isHybrid ? " — hybrid model, 1:2 rule not applicable" : ""}`,
+    name: "Attn:FFN ratio in 1:2 band (V3 派 convention)",
+    ok: inBand || isHybrid,
+    msg: `attn/ffn = 1:${(1/r).toFixed(2)} (r=${r.toFixed(3)})${isHybrid ? " — hybrid model exempt" : ""}`,
     sev: (inBand || isHybrid) ? "ok" : "warn"
   });
   const rho = spec.d_expert / h;
@@ -867,13 +871,31 @@ function renderCompare(spec, r) {
   if (a) { const s = {...ANCHORS[a], _label: a}; s._r = computeAll(s); specs.push(s); }
   if (b) { const s = {...ANCHORS[b], _label: b}; s._r = computeAll(s); specs.push(s); }
 
+  const attnTypeStr = s => {
+    if (s.hybrid_attn && s.hybrid_attn.length > 0) {
+      return "hybrid: " + s.hybrid_attn.map(([c, ls]) => `${c}×${ls.kind}`).join(", ");
+    }
+    return s.attn_type;
+  };
+  const qkvStr = s => {
+    if (s.hybrid_attn && s.hybrid_attn.length > 0) return "(see Attn type row)";
+    return `${s.num_q_heads}/${s.num_kv_heads}`;
+  };
+  const headDimStr = s => {
+    if (s.hybrid_attn && s.hybrid_attn.length > 0) {
+      const dims = [...new Set(s.hybrid_attn.map(([_, ls]) => ls.head_dim))].sort();
+      return dims.join("/");
+    }
+    return s.head_dim;
+  };
+
   const rows = [
     ["Name", s => s.name || "(custom)"],
     ["Layers", s => s.num_layers],
     ["Hidden", s => s.hidden],
-    ["Q/KV", s => `${s.num_q_heads}/${s.num_kv_heads}`],
-    ["head_dim", s => s.head_dim],
-    ["Attn type", s => s.hybrid_attn ? "hybrid" : s.attn_type],
+    ["Attn type", attnTypeStr],
+    ["Q/KV", qkvStr],
+    ["head_dim", headDimStr],
     ["N routed", s => s.n_routed],
     ["Top-K", s => s.top_k],
     ["d_expert", s => s.d_expert],
@@ -886,6 +908,7 @@ function renderCompare(spec, r) {
     ["Attn:FFN", s => `1:${(1/s._r.attnFfnRatio).toFixed(2)}`],
     ["—"],
     ["KV @ 128K", s => fmtGB(s._r.kv_128k)],
+    ["KV @ 1M", s => fmtGB(s._r.kv_1m)],
     ["Decode ms/tok", s => s._r.decode.total_ms.toFixed(2)],
     ["Prefill TPS", s => s._r.prefill.tps.toFixed(0)],
   ];
