@@ -34,7 +34,7 @@ ANCHORS = {
     ),
     "moonlight": MoEArchSpec(
         name="Moonlight-16B-A3B (Moonshot, Muon-trained, MLA)",
-        # Source: moonshotai/Moonlight-16B-A3B; uses V3-small (MLA) arch
+        # Source: moonshotai/Moonlight-16B-A3B/config.json; uses V3-small (MLA) arch
         # CORRECTED 2026-05: attn_type was gqa, should be mla per xlsx + V3-small lineage
         hidden=2048, num_layers=27, head_dim=128,
         num_q_heads=16, num_kv_heads=16,
@@ -43,24 +43,24 @@ ANCHORS = {
         kv_lora_rank=512,
         qk_nope_head_dim=128, qk_rope_head_dim=64, v_head_dim=128,
         n_routed=64, top_k=6, n_shared=2, d_expert=1408,
-        first_k_dense=1, dense_intermediate=10944,
+        first_k_dense=1, dense_intermediate=11264,
         vocab_size=163840, tied_embedding=False,
         mtp_depth=0,
-        notes="V3-small arch + Muon optimizer. Paper: arXiv 2502.16982",
+        notes="V3-small arch + Muon optimizer. HF config intermediate_size=11264. Paper: arXiv 2502.16982",
     ),
 
     "ling-mini-2": MoEArchSpec(
         name="Ling-mini-2.0 (16B/1.4B)",
-        # Source: Ling 2.0 paper Table 1; arXiv 2510.22115
+        # Source: inclusionAI/Ling-mini-2.0/config.json; Ling 2.0 paper Table 1 for family context
         hidden=2048, num_layers=20,
         head_dim=128,
-        num_q_heads=16, num_kv_heads=8,  # paper says "8/16/32" for KV; mini uses 8 (GQA 2:1)
+        num_q_heads=16, num_kv_heads=4,
         attn_type="gqa",
         n_routed=256, top_k=8, n_shared=1, d_expert=512,
         first_k_dense=1, dense_intermediate=5120,
-        vocab_size=156000, tied_embedding=False,
-        mtp_depth=1, mtp_is_moe=False,  # Ling uses dense MTP
-        notes="Short-wide 16B; 1/32 expert-slot. Paper: arXiv 2510.22115",
+        vocab_size=157184, tied_embedding=False,
+        mtp_depth=0, mtp_is_moe=False,
+        notes="Short-wide 16B; 1/32 expert-slot. HF config num_nextn_predict_layers=0.",
     ),
 
     "deepseekmoe-16b": MoEArchSpec(
@@ -71,7 +71,7 @@ ANCHORS = {
         attn_type="mha",
         n_routed=64, top_k=6, n_shared=2, d_expert=1408,
         first_k_dense=1, dense_intermediate=10944,
-        vocab_size=100000, tied_embedding=False,
+        vocab_size=102400, tied_embedding=False,
         mtp_depth=0,
         notes="Origin of fine-grained + shared expert MoE paradigm. Paper: arXiv 2401.06066",
     ),
@@ -121,16 +121,16 @@ ANCHORS = {
     # ─────────────────── 100B segment ───────────────────
     "ling-flash-2": MoEArchSpec(
         name="Ling-flash-2.0 (103B/6.1B)",
-        # Source: Ling 2.0 paper Table 1
+        # Source: inclusionAI/Ling-flash-2.0/config.json; Ling 2.0 paper Table 1 for family context
         hidden=4096, num_layers=32,
         head_dim=128,
-        num_q_heads=32, num_kv_heads=16,
+        num_q_heads=32, num_kv_heads=4,
         attn_type="gqa",
         n_routed=256, top_k=8, n_shared=1, d_expert=1024,
         first_k_dense=1, dense_intermediate=9216,
-        vocab_size=156000, tied_embedding=False,
+        vocab_size=157184, tied_embedding=False,
         mtp_depth=1, mtp_is_moe=False,
-        notes="100B base, ~5.9% active. Paper: arXiv 2510.22115",
+        notes="100B base, ~5.9% active. HF config num_key_value_heads=4; paper: arXiv 2510.22115",
     ),
     "glm-4.5-air": MoEArchSpec(
         name="GLM-4.5-Air (106B/12B)",
@@ -207,16 +207,16 @@ ANCHORS = {
     ),
     "ling-1t": MoEArchSpec(
         name="Ling-1T (1T/51B, GQA + FP8)",
-        # Source: Ling 2.0 paper Table 1
+        # Source: inclusionAI/Ling-1T/config.json; Ling 2.0 paper Table 1 for family context
         hidden=8192, num_layers=80,
         head_dim=128,
-        num_q_heads=64, num_kv_heads=32,
+        num_q_heads=64, num_kv_heads=8,
         attn_type="gqa",
         n_routed=256, top_k=8, n_shared=1, d_expert=2048,
         first_k_dense=4, dense_intermediate=18432,
-        vocab_size=156000, tied_embedding=False,
+        vocab_size=157184, tied_embedding=False,
         mtp_depth=1, mtp_is_moe=False,
-        notes="Largest FP8 base. Paper: arXiv 2510.22115",
+        notes="Largest FP8 base. HF config num_key_value_heads=8; paper: arXiv 2510.22115",
     ),
 
     # ─────────────────── Hybrid attention (2025-2026) ───────────────────
@@ -235,11 +235,11 @@ ANCHORS = {
                                window_size=512)),
         ],
         n_routed=288, top_k=8, n_shared=1, d_expert=1280,
-        first_k_dense=3, dense_intermediate=11520,  # = 9 × 1280 (compute-equivalent)
-        vocab_size=131072, tied_embedding=False,
+        first_k_dense=3, dense_intermediate=11264,
+        vocab_size=128896, tied_embedding=False,
         mtp_depth=3, mtp_is_moe=False,
         notes="Hybrid SWA+Full; Augmented 96Q SWA heads; Head-wise Gated Attention. "
-              "Paper: arXiv 2602.10604. Verified vs xlsx ground truth: total 196.96B ≈ 196B ✓",
+              "HF config/model card: intermediate_size=11264, vocab_size=128896, nextn=3.",
     ),
     "qwen3-next": MoEArchSpec(
         name="Qwen3-Next-80B (80B/3B, DeltaNet:Attn 3:1 hybrid)",

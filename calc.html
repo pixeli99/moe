@@ -740,12 +740,22 @@ function computeAll(spec) {
   const routerTotal = routerPerLayer * nMoE;
   const emb = spec.vocab_size * h * (spec.tied_embedding ? 1 : 2);
 
+  // MTP storage params (full MoE module) + active params (per-token training FLOPs)
   let mtpParams = 0;
+  let mtpActiveParams = 0;
   if (spec.mtp_depth > 0) {
-    const perMod = (attnTotal / L) + (spec.mtp_is_moe
+    const attnPer = attnTotal / L;
+    const proj = 2 * h * h;
+    // Storage: full MoE block (all routed experts kept in memory)
+    const ffnFull = spec.mtp_is_moe
       ? (moeRoutedTotal / nMoE + moeSharedTotal / nMoE + routerPerLayer)
-      : ffnDense) + 2 * h * h;
-    mtpParams = spec.mtp_depth * perMod;
+      : ffnDense;
+    mtpParams = spec.mtp_depth * (attnPer + ffnFull + proj);
+    // Active: MTP MoE block also sparse-fires K+N_sh experts per token
+    const ffnActive = spec.mtp_is_moe
+      ? (moeActivePerLayer + routerPerLayer)
+      : ffnDense;
+    mtpActiveParams = spec.mtp_depth * (attnPer + ffnActive + proj);
   }
 
   const total = emb + attnTotal + ffnDenseTotal + moeRoutedTotal + moeSharedTotal + routerTotal + mtpParams;
@@ -796,7 +806,9 @@ function computeAll(spec) {
 
   const trainTokens = (spec.train_tokens_t || 20) * 1e12;
   const lmHeadParams = spec.vocab_size * h;
-  const totalTrainActive = activeStrict + lmHeadParams + mtpParams;
+  // Training FLOPs use MTP ACTIVE (not full storage): MTP block fires K+N_sh
+  // experts per token, same sparsity as main model
+  const totalTrainActive = activeStrict + lmHeadParams + mtpActiveParams;
   const trainFlops = 6 * totalTrainActive * trainTokens;
   const trainSec = trainFlops / (gpuPeakTflops * 1e12 * spec.mfu);
   const trainDays = trainSec / spec.num_gpus / 86400;
@@ -876,10 +888,10 @@ const ANCHORS = {
   "moonlight": {name:"Moonlight-16B-A3B (Moonshot, Muon, MLA)", hidden:2048, num_layers:27, head_dim:128,
     num_q_heads:16, num_kv_heads:16, attn_type:"mla", q_lora_rank:0, kv_lora_rank:512,
     qk_nope_head_dim:128, qk_rope_head_dim:64, v_head_dim:128, n_routed:64, top_k:6, n_shared:2,
-    d_expert:1408, first_k_dense:1, dense_intermediate:10944, vocab_size:163840, mtp_depth:0},
+    d_expert:1408, first_k_dense:1, dense_intermediate:11264, vocab_size:163840, mtp_depth:0},
   "deepseekmoe-16b": {name:"DeepSeekMoE-16B (16.4B/2.8B, MHA)", hidden:2048, num_layers:28, head_dim:128,
     num_q_heads:16, num_kv_heads:16, attn_type:"mha", n_routed:64, top_k:6, n_shared:2, d_expert:1408,
-    first_k_dense:1, dense_intermediate:10944, vocab_size:100000, mtp_depth:0},
+    first_k_dense:1, dense_intermediate:10944, vocab_size:102400, mtp_depth:0},
   "v2-236b": {name:"DeepSeek-V2 236B (21B, MLA)", hidden:5120, num_layers:60, head_dim:128,
     num_q_heads:128, num_kv_heads:128, attn_type:"mla", q_lora_rank:1536, kv_lora_rank:512,
     qk_nope_head_dim:128, qk_rope_head_dim:64, v_head_dim:128, n_routed:160, top_k:6, n_shared:2,
@@ -891,14 +903,14 @@ const ANCHORS = {
     num_q_heads:40, num_kv_heads:8, attn_type:"gqa", n_routed:256, top_k:8, n_shared:1, d_expert:1536,
     first_k_dense:1, dense_intermediate:13824, vocab_size:152064, mtp_depth:1, mtp_is_moe:false},
   "ling-mini-2": {name:"Ling-mini-2.0 (16B/1.4B)", hidden:2048, num_layers:20, head_dim:128,
-    num_q_heads:16, num_kv_heads:8, attn_type:"gqa", n_routed:256, top_k:8, n_shared:1, d_expert:512,
-    first_k_dense:1, dense_intermediate:5120, vocab_size:156000, mtp_depth:1, mtp_is_moe:false},
+    num_q_heads:16, num_kv_heads:4, attn_type:"gqa", n_routed:256, top_k:8, n_shared:1, d_expert:512,
+    first_k_dense:1, dense_intermediate:5120, vocab_size:157184, mtp_depth:0, mtp_is_moe:false},
   "ling-flash-2": {name:"Ling-flash-2.0 (103B/6.1B)", hidden:4096, num_layers:32, head_dim:128,
-    num_q_heads:32, num_kv_heads:16, attn_type:"gqa", n_routed:256, top_k:8, n_shared:1, d_expert:1024,
-    first_k_dense:1, dense_intermediate:9216, vocab_size:156000, mtp_depth:1, mtp_is_moe:false},
+    num_q_heads:32, num_kv_heads:4, attn_type:"gqa", n_routed:256, top_k:8, n_shared:1, d_expert:1024,
+    first_k_dense:1, dense_intermediate:9216, vocab_size:157184, mtp_depth:1, mtp_is_moe:false},
   "ling-1t": {name:"Ling-1T (1T/51B, GQA + FP8)", hidden:8192, num_layers:80, head_dim:128,
-    num_q_heads:64, num_kv_heads:32, attn_type:"gqa", n_routed:256, top_k:8, n_shared:1, d_expert:2048,
-    first_k_dense:4, dense_intermediate:18432, vocab_size:156000, mtp_depth:1, mtp_is_moe:false},
+    num_q_heads:64, num_kv_heads:8, attn_type:"gqa", n_routed:256, top_k:8, n_shared:1, d_expert:2048,
+    first_k_dense:4, dense_intermediate:18432, vocab_size:157184, mtp_depth:1, mtp_is_moe:false},
   "glm-4.5-air": {name:"GLM-4.5-Air (106B/12B)", hidden:4096, num_layers:46, head_dim:128,
     num_q_heads:96, num_kv_heads:8, attn_type:"gqa", n_routed:128, top_k:8, n_shared:1, d_expert:1408,
     first_k_dense:1, dense_intermediate:10944, vocab_size:151552, mtp_depth:1, mtp_is_moe:false},
@@ -914,7 +926,7 @@ const ANCHORS = {
       [12, {kind:"softmax", num_q_heads:64, num_kv_heads:8, head_dim:128}],
       [33, {kind:"swa", num_q_heads:96, num_kv_heads:8, head_dim:128, window_size:512}],
     ], n_routed:288, top_k:8, n_shared:1, d_expert:1280, first_k_dense:3,
-    dense_intermediate:11520, vocab_size:131072, mtp_depth:3, mtp_is_moe:false},
+    dense_intermediate:11264, vocab_size:128896, mtp_depth:3, mtp_is_moe:false},
   "v3": {name:"DeepSeek-V3 (671B/37B, MLA)", hidden:7168, num_layers:61, head_dim:192,
     num_q_heads:128, num_kv_heads:128, attn_type:"mla", q_lora_rank:1536, kv_lora_rank:512,
     qk_nope_head_dim:128, qk_rope_head_dim:64, v_head_dim:128, n_routed:256, top_k:8, n_shared:1,

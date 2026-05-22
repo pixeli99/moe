@@ -280,20 +280,40 @@ class MoEArchSpec:
         return emb if self.tied_embedding else 2 * emb
 
     def mtp_params(self) -> int:
-        """MTP module(s) per V3-style chain."""
+        """MTP module(s) total parameter count (storage cost).
+
+        Includes the FULL MoE block for sparse MTPs; this is what occupies
+        memory + checkpoint size. For training FLOPs use `mtp_active_params()`
+        instead — only the active expert subset fires per token.
+        """
         if self.mtp_depth == 0:
             return 0
-        # Each MTP module ≈ 1 transformer block + a linear projection + (shared embedding/head)
         attn = self.attn_params_per_layer()
         if self.mtp_is_moe:
             ffn = self.ffn_moe_total_per_layer() + self.router_per_layer()
         else:
             ffn = self.ffn_dense_per_layer()
-        # Linear projection layer M_k: 2d -> d
-        proj = 2 * self.hidden * self.hidden
-        # 2 RMSNorm in projection (negligible)
+        proj = 2 * self.hidden * self.hidden  # linear projection M_k: 2d → d
         per_module = attn + ffn + proj
         return self.mtp_depth * per_module
+
+    def mtp_active_params(self) -> int:
+        """Per-token active params in MTP modules during training/inference.
+
+        For sparse MTP (V3-style), only K + N_shared experts fire per token —
+        same as main-model MoE blocks. This is what enters the 6 × N × tokens
+        training-FLOPs formula, NOT the full module storage.
+        """
+        if self.mtp_depth == 0:
+            return 0
+        attn = self.attn_params_per_layer()
+        if self.mtp_is_moe:
+            ffn_active = self.ffn_moe_active_per_layer() + self.router_per_layer()
+        else:
+            ffn_active = self.ffn_dense_per_layer()
+        proj = 2 * self.hidden * self.hidden
+        per_module_active = attn + ffn_active + proj
+        return self.mtp_depth * per_module_active
 
     def params_breakdown(self) -> dict[str, int]:
         """Detailed per-module total params (hybrid-aware on attention)."""
@@ -417,18 +437,27 @@ class MoEArchSpec:
         return attn_proj + attn_qk + ffn_active + lm_head
 
     def training_flops(self, train_tokens: int) -> int:
-        """Total training FLOPs ≈ 6 × (active + lm_head + MTP) × tokens.
+        """Total training FLOPs ≈ 6 × (active + lm_head + mtp_active) × tokens.
 
-        Includes:
-        - active params (strict): attn, dense_ffn, moe_active, router
-        - LM head projection (vocab × hidden, fires per token)
-        - MTP modules (trained alongside main model in V3/Ling/Step)
+        Uses Chinchilla 6× factor (2× forward + 4× backward).
 
-        Excludes embedding lookup (O(1) memory, not compute).
+        Per-token "training-active" params include:
+        - active params (strict): attn, dense_ffn, moe_active routed+shared, router
+        - LM head projection: vocab × hidden (fires per token)
+        - MTP active: 1 attn + active MoE FFN + projection per MTP module
+          (uses `mtp_active_params`, NOT full `mtp_params`, because MTP is
+           also sparse — only K+N_sh experts fire per token in MTP block)
+
+        Excludes:
+        - embedding lookup (O(1) memory, not compute)
+        - optimizer step (small relative to fwd+bwd)
+        - activation recomputation (would add +1-2× depending on strategy)
         """
         lm_head = self.vocab_size * self.hidden
-        mtp = self.mtp_params()  # full MTP modules trained per step
-        total_train_active = self.active_params(include_embedding=False) + lm_head + mtp
+        mtp_active = self.mtp_active_params()
+        total_train_active = (
+            self.active_params(include_embedding=False) + lm_head + mtp_active
+        )
         return 6 * total_train_active * train_tokens
 
     def training_cost(
