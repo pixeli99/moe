@@ -33,12 +33,15 @@ ANCHORS = {
         notes="The 16B-segment anchor model. Paper: arXiv 2405.04434",
     ),
     "moonlight": MoEArchSpec(
-        name="Moonlight-16B-A3B (Moonshot, Muon-trained)",
-        # Source: moonshotai/Moonlight-16B-A3B/config.json; uses V3-small arch
-        hidden=2048, num_layers=27,
-        head_dim=128,
+        name="Moonlight-16B-A3B (Moonshot, Muon-trained, MLA)",
+        # Source: moonshotai/Moonlight-16B-A3B; uses V3-small (MLA) arch
+        # CORRECTED 2026-05: attn_type was gqa, should be mla per xlsx + V3-small lineage
+        hidden=2048, num_layers=27, head_dim=128,
         num_q_heads=16, num_kv_heads=16,
-        attn_type="gqa",  # Moonlight uses MHA actually (Q==KV) = GQA(1:1)
+        attn_type="mla",
+        q_lora_rank=None,  # V2-Lite style (no Q LoRA)
+        kv_lora_rank=512,
+        qk_nope_head_dim=128, qk_rope_head_dim=64, v_head_dim=128,
         n_routed=64, top_k=6, n_shared=2, d_expert=1408,
         first_k_dense=1, dense_intermediate=10944,
         vocab_size=163840, tied_embedding=False,
@@ -58,6 +61,61 @@ ANCHORS = {
         vocab_size=156000, tied_embedding=False,
         mtp_depth=1, mtp_is_moe=False,  # Ling uses dense MTP
         notes="Short-wide 16B; 1/32 expert-slot. Paper: arXiv 2510.22115",
+    ),
+
+    "deepseekmoe-16b": MoEArchSpec(
+        name="DeepSeekMoE-16B (16.4B/2.8B, MHA, original MoE paper)",
+        # Source: deepseek-ai/deepseek-moe-16b-base/config.json; arXiv 2401.06066
+        hidden=2048, num_layers=28, head_dim=128,
+        num_q_heads=16, num_kv_heads=16,
+        attn_type="mha",
+        n_routed=64, top_k=6, n_shared=2, d_expert=1408,
+        first_k_dense=1, dense_intermediate=10944,
+        vocab_size=100000, tied_embedding=False,
+        mtp_depth=0,
+        notes="Origin of fine-grained + shared expert MoE paradigm. Paper: arXiv 2401.06066",
+    ),
+
+    # ─────────────────── 200B-300B segment ───────────────────
+    "v2-236b": MoEArchSpec(
+        name="DeepSeek-V2 236B (21B, MLA legacy)",
+        # Source: deepseek-ai/DeepSeek-V2/config.json; arXiv 2405.04434
+        hidden=5120, num_layers=60, head_dim=128,
+        num_q_heads=128, num_kv_heads=128,
+        attn_type="mla",
+        q_lora_rank=1536, kv_lora_rank=512,
+        qk_nope_head_dim=128, qk_rope_head_dim=64, v_head_dim=128,
+        n_routed=160, top_k=6, n_shared=2, d_expert=1536,
+        first_k_dense=1, dense_intermediate=12288,  # = (6+2) × 1536
+        vocab_size=102400, tied_embedding=False,
+        mtp_depth=0,
+        notes="V3's predecessor; MLA + device-limited routing (M=3). Paper: arXiv 2405.04434",
+    ),
+    "mimo-v2-flash": MoEArchSpec(
+        name="MiMo-V2-Flash 309B (15B, Hybrid SWA+GA, GQA 64Q/8KV)",
+        # Source: xlsx + GQA inferred (KV=8 makes active match xlsx 15B exactly)
+        hidden=4096, num_layers=48, head_dim=192,
+        num_q_heads=64, num_kv_heads=8,
+        attn_type="gqa",
+        n_routed=256, top_k=8, n_shared=0, d_expert=2048,
+        first_k_dense=1, dense_intermediate=16384,  # 8 × 2048
+        vocab_size=128256, tied_embedding=False,
+        mtp_depth=1, mtp_is_moe=False,
+        notes="Reasoning-focused; 27T tokens; sequence aux 1e-5. KV=8 inferred from active=15B",
+    ),
+    "dots3": MoEArchSpec(
+        name="Dots3 (295B/15B, Hybrid + MLA+MTP, approximate)",
+        # Source: xlsx; rednote next-gen; xlsx "num_q=256" likely refers to
+        # Q-promoted MLA dim, not actual head count. KV=8 GQA inferred to match active 15B.
+        hidden=5120, num_layers=46, head_dim=128,
+        num_q_heads=40, num_kv_heads=8,   # inferred (256 in xlsx likely means Q-promote 256×128 in MLA)
+        attn_type="gqa",                   # treat as GQA approximation
+        n_routed=256, top_k=8, n_shared=1, d_expert=1536,
+        first_k_dense=1, dense_intermediate=13824,
+        vocab_size=152064, tied_embedding=False,
+        mtp_depth=1, mtp_is_moe=False,
+        notes="⚠️ Approximate. xlsx says 'num_q=256, mla 128 swa 192' which is unclear; "
+              "we model as GQA 40Q/8KV to match active=15B. Hybrid attn layout not modeled.",
     ),
 
     # ─────────────────── 100B segment ───────────────────
@@ -163,11 +221,11 @@ ANCHORS = {
 
     # ─────────────────── Hybrid attention (2025-2026) ───────────────────
     "step-3.5-flash": MoEArchSpec(
-        name="Step 3.5 Flash (196.81B/11B, SWA:Full 3:1 hybrid)",
-        # Source: arXiv 2602.10604 §2.2 + Table on page 6
-        # 45L = 3 dense + 42 MoE; attention pattern: 1 leading Full + 11 × (3 SWA + 1 Full)
-        # = 12 Full + 33 SWA = 45 attention layers (Augmented SWA: 96Q vs Full 64Q)
-        hidden=5120,  # inferred from "5120 hidden" mention in paper
+        name="Step 3.5 Flash (196B/11B, SWA:Full 3:1 hybrid)",
+        # Source: arXiv 2602.10604 + xlsx ground truth (corrected 2026-05)
+        # 45L = 3 dense + 42 MoE; attention: 1 leading Full + 11 × (3 SWA + 1 Full)
+        # CORRECTED: hidden=4096 (was 5120), d_expert=1280 (was 1024)
+        hidden=4096,
         num_layers=45, head_dim=128,
         num_q_heads=64, num_kv_heads=8,  # nominal Full-attn config (overridden by hybrid_attn)
         attn_type="gqa",
@@ -176,12 +234,12 @@ ANCHORS = {
             (33, AttnLayerSpec(kind="swa", num_q_heads=96, num_kv_heads=8, head_dim=128,
                                window_size=512)),
         ],
-        n_routed=288, top_k=8, n_shared=1, d_expert=1024,  # reverse-engineered from 196.81B total / 11B active
-        first_k_dense=3, dense_intermediate=9216,  # = 9 × 1024 (compute-equivalent)
+        n_routed=288, top_k=8, n_shared=1, d_expert=1280,
+        first_k_dense=3, dense_intermediate=11520,  # = 9 × 1280 (compute-equivalent)
         vocab_size=131072, tied_embedding=False,
-        mtp_depth=3, mtp_is_moe=False,  # Step uses 3 dense MTP heads
+        mtp_depth=3, mtp_is_moe=False,
         notes="Hybrid SWA+Full; Augmented 96Q SWA heads; Head-wise Gated Attention. "
-              "Paper: arXiv 2602.10604. d_expert=1024 reverse-engineered (paper omits).",
+              "Paper: arXiv 2602.10604. Verified vs xlsx ground truth: total 196.96B ≈ 196B ✓",
     ),
     "qwen3-next": MoEArchSpec(
         name="Qwen3-Next-80B (80B/3B, DeltaNet:Attn 3:1 hybrid)",
