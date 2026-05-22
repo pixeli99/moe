@@ -433,9 +433,9 @@ class MoEArchSpec:
         """
         b = DTypeBytes[dtype]
         active_bytes = self.active_params() * b
-        # KV cache traversed per decode step: full cache up to current position
-        kv_per_layer = self.kv_cache_bytes_per_token_per_layer(dtype)
-        kv_total = kv_per_layer * self.num_layers * kv_seq_len
+        # KV cache traversed per decode step: full cache at current ctx position.
+        # MUST use hybrid-aware total (SWA caps at window, linear has fixed state).
+        kv_total = self.kv_cache_bytes_total(kv_seq_len, batch=1, dtype=dtype)
 
         effective_bw_bps = hbm_bandwidth_gbps * 1e9 * effective_bw_fraction
         active_ms = active_bytes / effective_bw_bps * 1000
@@ -493,7 +493,8 @@ class MoEArchSpec:
                 head_d = self.qk_nope_head_dim + self.qk_rope_head_dim
             else:
                 head_d = self.head_dim
-            attn_quad = 2 * self.num_q_heads * head_d * n * n * self.num_layers
+            # Coefficient 4 = 2 (QK^T) + 2 (Attn × V); matches AttnLayerSpec.attn_quadratic_flops
+            attn_quad = 4 * self.num_q_heads * head_d * n * n * self.num_layers
 
         total_flops = proj_flops + attn_quad
         effective_flops_per_sec = gpu_peak_tflops * 1e12 * mfu
@@ -514,25 +515,38 @@ class MoEArchSpec:
         """All design rules that should hold for V3-派 MoE."""
         checks = []
 
-        # 1. head_dim divides hidden (for GQA/MHA Q proj)
-        if self.attn_type in ("gqa", "mha"):
-            q_total = self.num_q_heads * self.head_dim
-            checks.append(CheckResult(
-                "head_dim × num_q_heads = hidden",
-                q_total == self.hidden,
-                f"{self.num_q_heads}×{self.head_dim}={q_total} vs hidden={self.hidden}",
-                "warn" if q_total != self.hidden else "info",
-            ))
+        # Hybrid attention: skip uniform attention checks; instead check each layer kind
+        if self.hybrid_attn is not None:
+            for count, ls in self.hybrid_attn:
+                if ls.kind in ("softmax", "swa"):
+                    q_total = ls.num_q_heads * ls.head_dim
+                    checks.append(CheckResult(
+                        f"hybrid layer ({ls.kind}, ×{count}): Q×head = hidden",
+                        q_total == self.hidden,
+                        f"{ls.num_q_heads}×{ls.head_dim}={q_total} vs hidden={self.hidden}"
+                        + (" (this is OK for some Q-promoted designs, e.g. Qwen3-Next)" if q_total != self.hidden else ""),
+                        "info",
+                    ))
+        else:
+            # 1. head_dim divides hidden (for GQA/MHA Q proj)
+            if self.attn_type in ("gqa", "mha"):
+                q_total = self.num_q_heads * self.head_dim
+                checks.append(CheckResult(
+                    "head_dim × num_q_heads = hidden",
+                    q_total == self.hidden,
+                    f"{self.num_q_heads}×{self.head_dim}={q_total} vs hidden={self.hidden}",
+                    "warn" if q_total != self.hidden else "info",
+                ))
 
-        # 2. GQA ratio (num_q / num_kv) is integer
-        if self.attn_type == "gqa":
-            ratio = self.num_q_heads / self.num_kv_heads
-            checks.append(CheckResult(
-                "GQA Q:KV ratio integer",
-                ratio == int(ratio),
-                f"Q/KV = {self.num_q_heads}/{self.num_kv_heads} = {ratio:.2f}",
-                "error" if ratio != int(ratio) else "info",
-            ))
+            # 2. GQA ratio (num_q / num_kv) is integer
+            if self.attn_type == "gqa":
+                ratio = self.num_q_heads / self.num_kv_heads
+                checks.append(CheckResult(
+                    "GQA Q:KV ratio integer",
+                    ratio == int(ratio),
+                    f"Q/KV = {self.num_q_heads}/{self.num_kv_heads} = {ratio:.2f}",
+                    "error" if ratio != int(ratio) else "info",
+                ))
 
         # 3. dense_intermediate = (K + N_sh) × d_expert (compute-equivalent)
         expected = (self.top_k + self.n_shared) * self.d_expert
@@ -665,10 +679,18 @@ class MoEArchSpec:
         if self.mtp_depth:
             lines.append(f"  MTP:       D={self.mtp_depth} ({'MoE' if self.mtp_is_moe else 'dense'})")
         lines.append("")
-        lines.append("  ── Params ──")
+        lines.append("  ── Params ──  (% of base total, excludes MTP)")
+        mtp_v = b.get("mtp", 0)
+        base_total = total  # total = total_params_no_mtp() returned above
         for k, v in b.items():
-            lines.append(f"     {k:18s} {fmt(v):>10s}  ({100*v/total:5.2f}%)")
-        lines.append(f"     {'TOTAL':18s} {fmt(total):>10s}")
+            if k == "mtp":
+                continue
+            lines.append(f"     {k:18s} {fmt(v):>10s}  ({100*v/base_total:5.2f}%)")
+        lines.append(f"     {'BASE TOTAL':18s} {fmt(base_total):>10s}  (no MTP)")
+        if mtp_v > 0:
+            grand = base_total + mtp_v
+            lines.append(f"     {'+ MTP module':18s} {fmt(mtp_v):>10s}  (+{100*mtp_v/base_total:5.2f}% over base)")
+            lines.append(f"     {'TOTAL incl. MTP':18s} {fmt(grand):>10s}")
         lines.append(f"     {'ACTIVE (strict)':18s} {fmt(active):>10s}  (per token, no embedding)")
         lines.append(f"     {'ACTIVE (V3 口径)':18s} {fmt(active_v3):>10s}  (per token, w/ embedding)")
         lines.append("")

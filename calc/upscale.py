@@ -33,6 +33,27 @@ from dataclasses import replace
 from .spec import MoEArchSpec
 
 
+def _rescale_hybrid_attn(base, target_layers: int):
+    """Scale hybrid_attn layer counts proportionally to new layer count.
+
+    Returns None if base has no hybrid_attn. Returns a new hybrid_attn list
+    whose counts sum exactly to target_layers (largest-remainder rounding).
+    """
+    if not base.hybrid_attn:
+        return None
+    L = base.num_layers
+    raw = [(c * target_layers / L, ls) for c, ls in base.hybrid_attn]
+    # Largest-remainder rounding so sum == target_layers exactly
+    floors = [(int(v), v - int(v), ls) for v, ls in raw]
+    leftover = target_layers - sum(f for f, _, _ in floors)
+    # Sort by remainder desc; bump the top `leftover` ones
+    order = sorted(range(len(floors)), key=lambda i: -floors[i][1])
+    counts = [f for f, _, _ in floors]
+    for i in order[:leftover]:
+        counts[i] += 1
+    return [(counts[i], floors[i][2]) for i in range(len(floors))]
+
+
 def solar_dus(base: MoEArchSpec, target_layers: int) -> MoEArchSpec:
     """SOLAR-DUS depth upscale.
 
@@ -44,6 +65,7 @@ def solar_dus(base: MoEArchSpec, target_layers: int) -> MoEArchSpec:
 
     Returns:
         New spec with num_layers = target_layers, all other fields preserved.
+        For hybrid models, hybrid_attn schedule is rescaled proportionally.
 
     Notes:
         Active params per token scale up by (target_layers / base.num_layers).
@@ -59,14 +81,18 @@ def solar_dus(base: MoEArchSpec, target_layers: int) -> MoEArchSpec:
         raise ValueError(f"target_layers must be 2L - 2k for integer k; got drop_total={drop_total}")
     drop_per_copy = drop_total // 2
 
+    new_hybrid = _rescale_hybrid_attn(base, target_layers)
+
     return replace(
         base,
         name=f"{base.name} [SOLAR-DUS to {target_layers}L]",
         num_layers=target_layers,
+        hybrid_attn=new_hybrid,
         notes=(
             f"SOLAR-DUS: copy base → drop {drop_per_copy} middle layers each → concat. "
             f"2 × ({L}L − {drop_per_copy}L) = {target_layers}L. "
             f"Active params ↑ {target_layers/L:.2f}×. Recovery ~3T tokens."
+            + (f" Hybrid attn rescaled: {new_hybrid and [(c, l.kind) for c,l in new_hybrid]}." if new_hybrid else "")
         ),
     )
 

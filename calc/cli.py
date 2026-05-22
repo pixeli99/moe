@@ -17,6 +17,37 @@ Usage:
 """
 import sys
 from .anchors import ANCHORS, get_anchor, list_anchors
+
+
+def _parse_flags(argv: list[str], start: int, flags: dict) -> dict:
+    """Robust flag parser with bounds checking.
+
+    Args:
+        argv: full argv
+        start: index from which to parse flags
+        flags: dict mapping flag name (e.g. "--gpus") to (kwarg_name, converter)
+                e.g. {"--gpus": ("num_gpus", int), "--mfu": ("mfu", float)}
+
+    Returns: kwargs dict. Exits with error if a flag lacks a value.
+    """
+    out = {}
+    i = start
+    while i < len(argv):
+        a = argv[i]
+        if a in flags:
+            if i + 1 >= len(argv):
+                print(f"Error: flag '{a}' requires a value", file=sys.stderr)
+                sys.exit(1)
+            name, conv = flags[a]
+            try:
+                out[name] = conv(argv[i + 1])
+            except (ValueError, TypeError) as e:
+                print(f"Error: '{a} {argv[i+1]}' invalid ({e})", file=sys.stderr)
+                sys.exit(1)
+            i += 2
+        else:
+            i += 1
+    return out
 from .compare import compare_specs, summary_table
 from .upscale import solar_dus, sparse_upcycle, hybrid_upscale, upscale_summary
 from .wind_tunnel import wind_tunnel_summary
@@ -68,11 +99,11 @@ def main(argv: list[str] = None):
             print("usage: calc cost <anchor> <tokens_T> [--gpus N] [--mfu M] [--price P]"); return 1
         spec = get_anchor(argv[1])
         tokens = float(argv[2]) * 1e12
-        kwargs = {}
-        for i, a in enumerate(argv[3:]):
-            if a == "--gpus": kwargs["num_gpus"] = int(argv[3+i+1])
-            if a == "--mfu": kwargs["mfu"] = float(argv[3+i+1])
-            if a == "--price": kwargs["price_per_gpu_hour"] = float(argv[3+i+1])
+        kwargs = _parse_flags(argv, 3, {
+            "--gpus": ("num_gpus", int),
+            "--mfu": ("mfu", float),
+            "--price": ("price_per_gpu_hour", float),
+        })
         c = spec.training_cost(tokens, **kwargs)
         print(f"═══ Training cost: {spec.name} ═══\n")
         print(f"  Train tokens:    {tokens/1e12:.2f}T")
@@ -86,16 +117,14 @@ def main(argv: list[str] = None):
         if len(argv) < 2:
             print("usage: calc latency <anchor> [--ctx N] [--accept R] [--bw GBPS] [--bw-frac F]"); return 1
         spec = get_anchor(argv[1])
-        kwargs = {}
-        accept_rate = 0.75
-        i = 2
-        while i < len(argv):
-            a = argv[i]
-            if a == "--ctx": kwargs["kv_seq_len"] = int(argv[i+1]); i += 2
-            elif a == "--bw": kwargs["hbm_bandwidth_gbps"] = float(argv[i+1]); i += 2
-            elif a == "--bw-frac": kwargs["effective_bw_fraction"] = float(argv[i+1]); i += 2
-            elif a == "--accept": accept_rate = float(argv[i+1]); i += 2
-            else: i += 1
+        parsed = _parse_flags(argv, 2, {
+            "--ctx": ("kv_seq_len", int),
+            "--bw": ("hbm_bandwidth_gbps", float),
+            "--bw-frac": ("effective_bw_fraction", float),
+            "--accept": ("__accept", float),
+        })
+        accept_rate = parsed.pop("__accept", 0.75)
+        kwargs = parsed
         d = spec.decode_latency_ms(**kwargs)
         mtp_x = spec.mtp_speedup(accept_rate=accept_rate)
         print(f"═══ Inference latency: {spec.name} ═══\n")
@@ -121,15 +150,12 @@ def main(argv: list[str] = None):
         if len(argv) < 2:
             print("usage: calc wind-tunnel <target> [--num N] [--gpus G] [--small SIZE_B] [--large SIZE_B]"); return 1
         target = get_anchor(argv[1])
-        kwargs = {}
-        i = 2
-        while i < len(argv):
-            a = argv[i]
-            if a == "--num": kwargs["num_anchors"] = int(argv[i+1]); i += 2
-            elif a == "--gpus": kwargs["num_gpus"] = int(argv[i+1]); i += 2
-            elif a == "--small": kwargs["smallest_total_b"] = float(argv[i+1]); i += 2
-            elif a == "--large": kwargs["largest_total_b"] = float(argv[i+1]); i += 2
-            else: i += 1
+        kwargs = _parse_flags(argv, 2, {
+            "--num": ("num_anchors", int),
+            "--gpus": ("num_gpus", int),
+            "--small": ("smallest_total_b", float),
+            "--large": ("largest_total_b", float),
+        })
         print(wind_tunnel_summary(target, **kwargs))
         return 0
 
@@ -138,21 +164,23 @@ def main(argv: list[str] = None):
             print("usage: calc upscale <base> [--layers L] [--n N] [--method solar|upcycle|hybrid] "
                   "[--gpus N] [--mfu M] [--depth-tokens T] [--expert-tokens T]"); return 1
         base = get_anchor(argv[1])
-        target_layers = base.num_layers
-        target_n = base.n_routed
-        method = None
-        kwargs = {}
-        i = 2
-        while i < len(argv):
-            a = argv[i]
-            if a == "--layers": target_layers = int(argv[i+1]); i += 2
-            elif a == "--n": target_n = int(argv[i+1]); i += 2
-            elif a == "--method": method = argv[i+1]; i += 2
-            elif a == "--gpus": kwargs["num_gpus"] = int(argv[i+1]); i += 2
-            elif a == "--mfu": kwargs["mfu"] = float(argv[i+1]); i += 2
-            elif a == "--depth-tokens": kwargs["depth_recovery_tokens"] = float(argv[i+1]) * 1e12; i += 2
-            elif a == "--expert-tokens": kwargs["expert_recovery_tokens"] = float(argv[i+1]) * 1e12; i += 2
-            else: i += 1
+        parsed = _parse_flags(argv, 2, {
+            "--layers": ("__layers", int),
+            "--n": ("__n", int),
+            "--method": ("__method", str),
+            "--gpus": ("num_gpus", int),
+            "--mfu": ("mfu", float),
+            "--depth-tokens": ("__depth_t", float),
+            "--expert-tokens": ("__expert_t", float),
+        })
+        target_layers = parsed.pop("__layers", base.num_layers)
+        target_n = parsed.pop("__n", base.n_routed)
+        method = parsed.pop("__method", None)
+        if "__depth_t" in parsed:
+            parsed["depth_recovery_tokens"] = parsed.pop("__depth_t") * 1e12
+        if "__expert_t" in parsed:
+            parsed["expert_recovery_tokens"] = parsed.pop("__expert_t") * 1e12
+        kwargs = parsed
         # Auto-detect method
         if method is None:
             if target_layers != base.num_layers and target_n != base.n_routed:

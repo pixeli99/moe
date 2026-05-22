@@ -302,6 +302,7 @@ function attnLayerKVAt(layer, ctx, dtypeBytes) {
 }
 
 function attnLayerQuadFlops(layer, seqLen) {
+  // Coefficient 4 = 2 (QK^T multiply-add) + 2 (Attn × V multiply-add)
   if (layer.kind === "softmax") {
     return 4 * layer.num_q_heads * layer.head_dim * seqLen * seqLen;
   } else if (layer.kind === "swa") {
@@ -405,7 +406,7 @@ function computeAll(spec) {
     return 2 * spec.num_kv_heads * spec.head_dim * b * ctx * L;
   }
 
-  // Decode latency
+  // Decode latency (NOTE: kvAtCtx is already hybrid-aware so this matches summary KV)
   const ctxDecode = spec.kv_seq_len || 4096;
   const dtype = "bf16";
   const activeBytes = activeStrict * DTypeBytes[dtype];
@@ -414,7 +415,7 @@ function computeAll(spec) {
   const decodeMs = (activeBytes + kvBytes) / effBw * 1000;
   const mtpX = spec.mtp_depth > 0 ? 1 + spec.mtp_accept * spec.mtp_depth : 1.0;
 
-  // Prefill
+  // Prefill — attention quadratic coefficient is 4 (= 2 for QK^T + 2 for Attn×V)
   const n = ctxDecode;
   const projFlops = 2 * activeV3 * n;
   let attnQuad = 0;
@@ -424,7 +425,7 @@ function computeAll(spec) {
     }
   } else {
     const hd = spec.attn_type === "mla" ? (spec.qk_nope_head_dim + spec.qk_rope_head_dim) : spec.head_dim;
-    attnQuad = 2 * spec.num_q_heads * hd * n * n * L;
+    attnQuad = 4 * spec.num_q_heads * hd * n * n * L;
   }
   const totalFlopsPrefill = projFlops + attnQuad;
   const gpuPeakTflops = 989; // H100 BF16
@@ -441,7 +442,21 @@ function computeAll(spec) {
 
   // Invariants
   const checks = [];
-  if (!spec.hybrid_attn && (spec.attn_type === "gqa" || spec.attn_type === "mha")) {
+  if (spec.hybrid_attn && spec.hybrid_attn.length > 0) {
+    // Hybrid: check each layer kind; uniform num_q×head=hidden doesn't apply
+    for (const [count, ls] of spec.hybrid_attn) {
+      if (ls.kind === "softmax" || ls.kind === "swa") {
+        const qTotal = ls.num_q_heads * ls.head_dim;
+        checks.push({
+          name: `hybrid ${ls.kind} ×${count}: Q×head = hidden`,
+          ok: true,  // informational; some designs promote Q above hidden
+          msg: `${ls.num_q_heads}×${ls.head_dim}=${qTotal} vs hidden=${h}` +
+               (qTotal !== h ? " (Q-promoted design, e.g. Qwen3-Next/Step 3.5 Flash SWA)" : ""),
+          sev: "ok"
+        });
+      }
+    }
+  } else if (spec.attn_type === "gqa" || spec.attn_type === "mha") {
     const qTotal = spec.num_q_heads * spec.head_dim;
     checks.push({
       name: "num_q × head_dim = hidden",
@@ -773,7 +788,7 @@ function render(r, spec) {
     `Routed FFN ${fmtPct(r.moeRoutedTotal / r.totalNoMtp)} · ` +
     `${spec.attn_type ? spec.attn_type.toUpperCase() : ''} ${spec.num_q_heads}Q/${spec.num_kv_heads}KV head_dim ${spec.head_dim}`;
 
-  // Params breakdown
+  // Params breakdown (% based on BASE total, excludes MTP)
   const pb = [
     ["embedding", r.emb],
     ["attn_total", r.attnTotal],
@@ -781,11 +796,16 @@ function render(r, spec) {
     ["moe_ffn_routed", r.moeRoutedTotal],
     ["moe_ffn_shared", r.moeSharedTotal],
     ["router", r.routerTotal],
-    ["mtp", r.mtpParams],
   ];
-  document.getElementById("params-breakdown").innerHTML = pb.map(([k, v]) =>
-    row(k, `${fmt(v)} (${(v/r.total*100).toFixed(2)}%)`)
-  ).join("") + row("TOTAL", fmt(r.total), true);
+  let pbHtml = pb.map(([k, v]) =>
+    row(k, `${fmt(v)} (${(v/r.totalNoMtp*100).toFixed(2)}%)`)
+  ).join("");
+  pbHtml += row("BASE TOTAL (no MTP)", fmt(r.totalNoMtp), true);
+  if (r.mtpParams > 0) {
+    pbHtml += row("+ MTP module", `${fmt(r.mtpParams)} (+${(r.mtpParams/r.totalNoMtp*100).toFixed(2)}% over base)`);
+    pbHtml += row("TOTAL incl. MTP", fmt(r.total), true);
+  }
+  document.getElementById("params-breakdown").innerHTML = pbHtml;
 
   // Hybrid card
   if (spec.hybrid_attn && spec.hybrid_attn.length > 0) {

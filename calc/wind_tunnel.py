@@ -52,6 +52,19 @@ def scale_down(
         new_q = max(4, round(base.num_q_heads * c))
         new_kv = new_q
 
+    # Rescale hybrid_attn if present (largest-remainder so counts sum == new_layers)
+    new_hybrid = None
+    if base.hybrid_attn:
+        L = base.num_layers
+        raw = [(c * new_layers / L, ls) for c, ls in base.hybrid_attn]
+        floors = [(int(v), v - int(v), ls) for v, ls in raw]
+        leftover = new_layers - sum(f for f, _, _ in floors)
+        order = sorted(range(len(floors)), key=lambda i: -floors[i][1])
+        counts = [f for f, _, _ in floors]
+        for i in order[:leftover]:
+            counts[i] += 1
+        new_hybrid = [(counts[i], floors[i][2]) for i in range(len(floors)) if counts[i] > 0]
+
     return replace(
         base,
         name=f"{base.name} ↓{scale_factor:.3f}×",
@@ -61,6 +74,7 @@ def scale_down(
         num_kv_heads=new_kv,
         d_expert=new_d_expert,
         dense_intermediate=0,  # auto-recompute from (K+N_sh)*d_expert
+        hybrid_attn=new_hybrid,
         notes=f"Wind tunnel anchor at {scale_factor:.3f}× of {base.name}",
     )
 
