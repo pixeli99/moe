@@ -8,10 +8,13 @@ Usage:
   python -m calc all                           # summary table of all anchors
   python -m calc cost <anchor> <tokens_T>      # training cost estimate
   python -m calc parallel <anchor> <ep> <pp> <tp>  # parallelism check
+  python -m calc upscale <base> [--layers L] [--n N] [--method solar|upcycle|hybrid]
+                                               # simulate L100 → L200 upscale
 """
 import sys
 from .anchors import ANCHORS, get_anchor, list_anchors
 from .compare import compare_specs, summary_table
+from .upscale import solar_dus, sparse_upcycle, hybrid_upscale, upscale_summary
 
 
 def main(argv: list[str] = None):
@@ -72,6 +75,48 @@ def main(argv: list[str] = None):
         print(f"  GPU-hours:       {c['total_gpu_hours']:.0f}")
         print(f"  Wall-clock days: {c['wall_clock_days']:.1f}  (on {kwargs.get('num_gpus', 256)} GPUs)")
         print(f"  Estimated $:     ${c['estimated_cost_usd']:,.0f}  (@ ${kwargs.get('price_per_gpu_hour', 3.0)}/GPU-hr)")
+        return 0
+
+    if cmd == "upscale":
+        if len(argv) < 2:
+            print("usage: calc upscale <base> [--layers L] [--n N] [--method solar|upcycle|hybrid] "
+                  "[--gpus N] [--mfu M] [--depth-tokens T] [--expert-tokens T]"); return 1
+        base = get_anchor(argv[1])
+        target_layers = base.num_layers
+        target_n = base.n_routed
+        method = None
+        kwargs = {}
+        i = 2
+        while i < len(argv):
+            a = argv[i]
+            if a == "--layers": target_layers = int(argv[i+1]); i += 2
+            elif a == "--n": target_n = int(argv[i+1]); i += 2
+            elif a == "--method": method = argv[i+1]; i += 2
+            elif a == "--gpus": kwargs["num_gpus"] = int(argv[i+1]); i += 2
+            elif a == "--mfu": kwargs["mfu"] = float(argv[i+1]); i += 2
+            elif a == "--depth-tokens": kwargs["depth_recovery_tokens"] = float(argv[i+1]) * 1e12; i += 2
+            elif a == "--expert-tokens": kwargs["expert_recovery_tokens"] = float(argv[i+1]) * 1e12; i += 2
+            else: i += 1
+        # Auto-detect method
+        if method is None:
+            if target_layers != base.num_layers and target_n != base.n_routed:
+                method = "hybrid"
+            elif target_layers != base.num_layers:
+                method = "solar"
+            elif target_n != base.n_routed:
+                method = "upcycle"
+            else:
+                print("Nothing to do: target_layers and target_n both match base"); return 1
+        # Build target
+        if method == "solar":
+            target = solar_dus(base, target_layers)
+        elif method == "upcycle":
+            target = sparse_upcycle(base, target_n)
+        elif method == "hybrid":
+            target = hybrid_upscale(base, target_layers, target_n)
+        else:
+            print(f"Unknown method: {method}"); return 1
+        print(upscale_summary(base, target, **kwargs))
         return 0
 
     if cmd == "parallel":
