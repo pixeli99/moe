@@ -295,6 +295,96 @@ class MoEArchSpec:
             "estimated_cost_usd": sec / 3600 * price_per_gpu_hour,
         }
 
+    # ---------------------- Inference latency ----------------------
+
+    def decode_latency_ms(
+        self,
+        dtype: str = "bf16",
+        hbm_bandwidth_gbps: float = 3350.0,  # H100 HBM3 = 3.35 TB/s
+        effective_bw_fraction: float = 0.40,  # realistic Megatron / vLLM
+        kv_seq_len: int = 4096,
+    ) -> dict[str, float]:
+        """Per-token decode latency (single-stream, batch=1).
+
+        MoE decode is memory-bandwidth-bound: every token must read all
+        active params + the KV cache of all past tokens once. We compute:
+            latency = (active_param_bytes + kv_cache_read_bytes) / effective_BW
+
+        Theoretical lower bound; real systems achieve 30-50% of HBM BW.
+
+        Returns dict with breakdown.
+        """
+        b = DTypeBytes[dtype]
+        active_bytes = self.active_params() * b
+        # KV cache traversed per decode step: full cache up to current position
+        kv_per_layer = self.kv_cache_bytes_per_token_per_layer(dtype)
+        kv_total = kv_per_layer * self.num_layers * kv_seq_len
+
+        effective_bw_bps = hbm_bandwidth_gbps * 1e9 * effective_bw_fraction
+        active_ms = active_bytes / effective_bw_bps * 1000
+        kv_ms = kv_total / effective_bw_bps * 1000
+        total_ms = active_ms + kv_ms
+
+        return {
+            "active_params_GB": active_bytes / 1e9,
+            "kv_cache_GB": kv_total / 1e9,
+            "active_latency_ms": active_ms,
+            "kv_latency_ms": kv_ms,
+            "total_per_token_ms": total_ms,
+            "tokens_per_sec": 1000 / total_ms if total_ms > 0 else 0,
+        }
+
+    def mtp_speedup(self, accept_rate: float = 0.75) -> float:
+        """Speculative decoding speedup from MTP heads.
+
+        Accept rate = fraction of MTP-predicted tokens that match the main
+        model's would-be output. V3 paper reports ~85-90% acceptance for
+        MTP D=1; LongCat / Ling report similar.
+
+        Effective tokens per decode step = 1 + accept_rate * mtp_depth.
+        """
+        if self.mtp_depth == 0:
+            return 1.0
+        return 1.0 + accept_rate * self.mtp_depth
+
+    def prefill_throughput(
+        self,
+        seq_len: int = 4096,
+        gpu_peak_tflops: float = 989.0,  # H100 BF16
+        mfu: float = 0.50,  # prefill MFU usually higher than decode
+    ) -> dict[str, float]:
+        """Prefill throughput: tokens/sec for a single sequence of seq_len.
+
+        Prefill is compute-bound (process seq_len tokens in parallel).
+        Total prefill FLOPs = 2 × active_params × seq_len  (projections, FFN)
+                            + 2 × num_q × head_dim × seq_len² × num_layers  (attn QK^T+V)
+        """
+        n = seq_len
+        # Linear projections (Q, K, V, O, FFN gate/up/down, router) + LM head:
+        # active params include embedding/lm_head (V3 口径)
+        active = self.active_params(include_embedding=True)
+        proj_flops = 2 * active * n
+
+        # Attention quadratic
+        if self.attn_type == "mla":
+            head_d = self.qk_nope_head_dim + self.qk_rope_head_dim
+        else:
+            head_d = self.head_dim
+        attn_quad = 2 * self.num_q_heads * head_d * n * n * self.num_layers
+
+        total_flops = proj_flops + attn_quad
+        effective_flops_per_sec = gpu_peak_tflops * 1e12 * mfu
+        time_sec = total_flops / effective_flops_per_sec
+        return {
+            "total_flops": total_flops,
+            "proj_flops": proj_flops,
+            "attn_quad_flops": attn_quad,
+            "attn_quad_pct": attn_quad / total_flops * 100,
+            "time_sec": time_sec,
+            "tokens_per_sec": n / time_sec,
+            "time_per_token_ms": time_sec * 1000 / n,
+        }
+
     # ---------------------- Invariants ----------------------
 
     def check_invariants(self) -> list[CheckResult]:

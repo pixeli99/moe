@@ -10,11 +10,16 @@ Usage:
   python -m calc parallel <anchor> <ep> <pp> <tp>  # parallelism check
   python -m calc upscale <base> [--layers L] [--n N] [--method solar|upcycle|hybrid]
                                                # simulate L100 → L200 upscale
+  python -m calc latency <anchor> [--ctx N] [--accept R]
+                                               # decode latency + MTP speedup
+  python -m calc wind-tunnel <target> [--num N] [--gpus G]
+                                               # generate scaled-down anchors + cost
 """
 import sys
 from .anchors import ANCHORS, get_anchor, list_anchors
 from .compare import compare_specs, summary_table
 from .upscale import solar_dus, sparse_upcycle, hybrid_upscale, upscale_summary
+from .wind_tunnel import wind_tunnel_summary
 
 
 def main(argv: list[str] = None):
@@ -75,6 +80,57 @@ def main(argv: list[str] = None):
         print(f"  GPU-hours:       {c['total_gpu_hours']:.0f}")
         print(f"  Wall-clock days: {c['wall_clock_days']:.1f}  (on {kwargs.get('num_gpus', 256)} GPUs)")
         print(f"  Estimated $:     ${c['estimated_cost_usd']:,.0f}  (@ ${kwargs.get('price_per_gpu_hour', 3.0)}/GPU-hr)")
+        return 0
+
+    if cmd == "latency":
+        if len(argv) < 2:
+            print("usage: calc latency <anchor> [--ctx N] [--accept R] [--bw GBPS] [--bw-frac F]"); return 1
+        spec = get_anchor(argv[1])
+        kwargs = {}
+        accept_rate = 0.75
+        i = 2
+        while i < len(argv):
+            a = argv[i]
+            if a == "--ctx": kwargs["kv_seq_len"] = int(argv[i+1]); i += 2
+            elif a == "--bw": kwargs["hbm_bandwidth_gbps"] = float(argv[i+1]); i += 2
+            elif a == "--bw-frac": kwargs["effective_bw_fraction"] = float(argv[i+1]); i += 2
+            elif a == "--accept": accept_rate = float(argv[i+1]); i += 2
+            else: i += 1
+        d = spec.decode_latency_ms(**kwargs)
+        mtp_x = spec.mtp_speedup(accept_rate=accept_rate)
+        print(f"═══ Inference latency: {spec.name} ═══\n")
+        print(f"  Single-stream decode (batch=1, memory-bound):")
+        print(f"     active params:    {d['active_params_GB']:.2f} GB ({d['active_latency_ms']:.2f} ms)")
+        print(f"     KV cache traversed: {d['kv_cache_GB']:.2f} GB ({d['kv_latency_ms']:.2f} ms)")
+        print(f"     per-token total:  {d['total_per_token_ms']:.2f} ms")
+        print(f"     base TPS:         {d['tokens_per_sec']:.1f} tok/s")
+        if spec.mtp_depth:
+            print(f"  MTP speedup (D={spec.mtp_depth}, accept {accept_rate:.0%}):")
+            print(f"     effective TPS:    {d['tokens_per_sec'] * mtp_x:.1f} tok/s "
+                  f"({mtp_x:.2f}× single-token)")
+            print(f"     effective ms/tok: {d['total_per_token_ms'] / mtp_x:.2f} ms")
+        ctx = kwargs.get("kv_seq_len", 4096)
+        prefill = spec.prefill_throughput(seq_len=ctx)
+        print(f"  Prefill (compute-bound, seq_len={ctx}):")
+        print(f"     time per token:   {prefill['time_per_token_ms']:.3f} ms")
+        print(f"     prefill TPS:      {prefill['tokens_per_sec']:,.0f} tok/s")
+        print(f"     attn quadratic:   {prefill['attn_quad_pct']:.1f}% of FLOPs")
+        return 0
+
+    if cmd == "wind-tunnel":
+        if len(argv) < 2:
+            print("usage: calc wind-tunnel <target> [--num N] [--gpus G] [--small SIZE_B] [--large SIZE_B]"); return 1
+        target = get_anchor(argv[1])
+        kwargs = {}
+        i = 2
+        while i < len(argv):
+            a = argv[i]
+            if a == "--num": kwargs["num_anchors"] = int(argv[i+1]); i += 2
+            elif a == "--gpus": kwargs["num_gpus"] = int(argv[i+1]); i += 2
+            elif a == "--small": kwargs["smallest_total_b"] = float(argv[i+1]); i += 2
+            elif a == "--large": kwargs["largest_total_b"] = float(argv[i+1]); i += 2
+            else: i += 1
+        print(wind_tunnel_summary(target, **kwargs))
         return 0
 
     if cmd == "upscale":
