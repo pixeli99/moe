@@ -31,7 +31,8 @@ jobs:
           python3 build_html.py
           mkdir -p _site
           cp index.html _site/
-          # Also publish standalone visualizations if present
+          # Standalone HTML pages (calculator, visualizations)
+          [ -f calc.html ] && cp calc.html _site/ || true
           [ -f concepts.html ] && cp concepts.html _site/ || true
           [ -f depth_width.html ] && cp depth_width.html _site/ || true
           echo "Built files:" && ls -la _site/

@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MoE Architecture Calculator</title>
+<style>
+:root {
+  --bg: #fafbfc;
+  --panel: #ffffff;
+  --border: #d0d7de;
+  --accent: #0969da;
+  --accent-light: #ddf4ff;
+  --text: #1f2328;
+  --text-dim: #656d76;
+  --code-bg: #f6f8fa;
+  --ok: #1f883d;
+  --warn: #bf8700;
+  --err: #cf222e;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif;
+  background: var(--bg); color: var(--text);
+  font-size: 14px; line-height: 1.6;
+}
+header {
+  background: white; border-bottom: 1px solid var(--border);
+  padding: 12px 24px; display: flex; align-items: center; gap: 16px;
+  position: sticky; top: 0; z-index: 10;
+}
+header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+header .sub { color: var(--text-dim); font-size: 13px; }
+header a { color: var(--accent); text-decoration: none; margin-left: auto; font-size: 13px; }
+.container { display: grid; grid-template-columns: 380px 1fr; gap: 16px; padding: 16px; max-width: 1600px; margin: 0 auto; }
+.input-panel, .output-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.input-panel h2, .output-panel h2 { margin: 0 0 12px 0; font-size: 14px; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+.field { margin: 8px 0; display: grid; grid-template-columns: 140px 1fr; align-items: center; gap: 8px; }
+.field label { font-size: 13px; color: var(--text-dim); }
+.field input, .field select {
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px;
+  font-size: 13px; background: white; color: var(--text); font-family: ui-monospace, monospace;
+}
+.field input[type="number"] { width: 100%; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.section { margin: 16px 0; }
+.section-title { font-size: 13px; font-weight: 600; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+.results-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.card { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
+.card h3 { margin: 0 0 8px 0; font-size: 13px; font-weight: 600; }
+.kv-row { display: grid; grid-template-columns: 1fr auto; padding: 3px 0; font-size: 13px; font-family: ui-monospace, monospace; }
+.kv-row .k { color: var(--text-dim); }
+.kv-row .v { font-weight: 500; color: var(--text); }
+.kv-row.major { padding: 6px 0; border-top: 1px solid var(--border); margin-top: 4px; font-size: 14px; font-weight: 600; }
+.check { display: flex; gap: 6px; padding: 4px 0; font-size: 12px; align-items: flex-start; }
+.check .icon { flex-shrink: 0; width: 18px; text-align: center; }
+.check.ok .icon { color: var(--ok); }
+.check.warn .icon { color: var(--warn); }
+.check.err .icon { color: var(--err); }
+.check .body { flex: 1; }
+.check .name { font-weight: 500; }
+.check .msg { color: var(--text-dim); font-family: ui-monospace, monospace; font-size: 11px; margin-top: 2px; }
+.notes { font-size: 12px; color: var(--text-dim); margin-top: 8px; padding: 8px; background: var(--accent-light); border-radius: 4px; }
+.hybrid-row { padding: 4px 8px; background: white; border-radius: 4px; margin: 2px 0; font-family: ui-monospace, monospace; font-size: 12px; display: grid; grid-template-columns: auto 1fr; gap: 8px; }
+.hybrid-row .count { color: var(--accent); font-weight: 600; }
+.tabbar { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+.tabbar button { background: none; border: none; padding: 8px 12px; cursor: pointer; font-size: 13px; color: var(--text-dim); border-bottom: 2px solid transparent; }
+.tabbar button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { text-align: left; padding: 6px; background: var(--code-bg); border-bottom: 1px solid var(--border); font-weight: 600; }
+td { padding: 6px; border-bottom: 1px solid var(--border); font-family: ui-monospace, monospace; }
+.compare-controls { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.compare-controls select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; }
+.chip { display: inline-block; padding: 2px 8px; background: var(--accent-light); color: var(--accent); border-radius: 12px; font-size: 11px; font-weight: 500; }
+.btn { background: var(--accent); color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; }
+.btn-secondary { background: white; color: var(--text); border: 1px solid var(--border); }
+@media (max-width: 1024px) {
+  .container { grid-template-columns: 1fr; }
+  .results-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🧮 MoE Architecture Calculator</h1>
+  <span class="sub">params · active · KV · latency · cost · invariants</span>
+  <a href="./">← 论文笔记 index</a>
+  <a href="https://github.com/pixeli99/moe" target="_blank">GitHub</a>
+</header>
+
+<div class="container">
+
+  <!-- LEFT: input panel -->
+  <div class="input-panel">
+    <h2>📝 Spec</h2>
+
+    <div class="field">
+      <label>Preset</label>
+      <select id="preset">
+        <option value="">— custom —</option>
+      </select>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Backbone</div>
+      <div class="field"><label>Name</label><input type="text" id="name" value="My MoE"></div>
+      <div class="field"><label>Hidden</label><input type="number" id="hidden" value="4096"></div>
+      <div class="field"><label>Num layers</label><input type="number" id="num_layers" value="32"></div>
+      <div class="field"><label>First-K dense</label><input type="number" id="first_k_dense" value="1"></div>
+      <div class="field"><label>Vocab size</label><input type="number" id="vocab_size" value="128256"></div>
+      <div class="field"><label>Tied embedding</label><input type="checkbox" id="tied_embedding"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Attention</div>
+      <div class="field"><label>Type</label>
+        <select id="attn_type">
+          <option value="gqa">GQA</option>
+          <option value="mha">MHA</option>
+          <option value="mla">MLA</option>
+        </select>
+      </div>
+      <div class="field"><label>Q heads</label><input type="number" id="num_q_heads" value="32"></div>
+      <div class="field"><label>KV heads</label><input type="number" id="num_kv_heads" value="8"></div>
+      <div class="field"><label>head_dim</label><input type="number" id="head_dim" value="128"></div>
+      <div id="mla-fields" style="display:none;">
+        <div class="field"><label>q_lora_rank</label><input type="number" id="q_lora_rank" value="0" placeholder="0 = no Q LoRA"></div>
+        <div class="field"><label>kv_lora_rank</label><input type="number" id="kv_lora_rank" value="512"></div>
+        <div class="field"><label>qk_nope_head_dim</label><input type="number" id="qk_nope_head_dim" value="128"></div>
+        <div class="field"><label>qk_rope_head_dim</label><input type="number" id="qk_rope_head_dim" value="64"></div>
+        <div class="field"><label>v_head_dim</label><input type="number" id="v_head_dim" value="128"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">MoE</div>
+      <div class="field"><label>N routed</label><input type="number" id="n_routed" value="128"></div>
+      <div class="field"><label>Top-K</label><input type="number" id="top_k" value="8"></div>
+      <div class="field"><label>N shared</label><input type="number" id="n_shared" value="1"></div>
+      <div class="field"><label>d_expert</label><input type="number" id="d_expert" value="2048"></div>
+      <div class="field"><label>dense_int</label><input type="number" id="dense_intermediate" value="0" placeholder="0 = auto = (K+N_sh)×d_expert"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">MTP & Misc</div>
+      <div class="field"><label>MTP depth</label><input type="number" id="mtp_depth" value="0"></div>
+      <div class="field"><label>MTP is MoE</label><input type="checkbox" id="mtp_is_moe"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Inference / Cost params</div>
+      <div class="field"><label>KV ctx (decode)</label><input type="number" id="kv_seq_len" value="4096"></div>
+      <div class="field"><label>HBM BW (GB/s)</label><input type="number" id="hbm_bw" value="3350"></div>
+      <div class="field"><label>BW efficiency</label><input type="number" id="bw_frac" value="0.40" step="0.05"></div>
+      <div class="field"><label>MTP accept rate</label><input type="number" id="mtp_accept" value="0.75" step="0.05"></div>
+      <div class="field"><label>Train tokens (T)</label><input type="number" id="train_tokens_t" value="20" step="1"></div>
+      <div class="field"><label>GPU count</label><input type="number" id="num_gpus" value="256"></div>
+      <div class="field"><label>GPU $/hr</label><input type="number" id="price_per_hour" value="3" step="0.5"></div>
+      <div class="field"><label>MFU</label><input type="number" id="mfu" value="0.45" step="0.05"></div>
+    </div>
+  </div>
+
+  <!-- RIGHT: output panel -->
+  <div class="output-panel">
+    <h2>📊 Computed</h2>
+
+    <div class="tabbar">
+      <button class="active" data-tab="main">概览</button>
+      <button data-tab="params">参数账</button>
+      <button data-tab="latency">推理 / 训练</button>
+      <button data-tab="checks">不变量校验</button>
+      <button data-tab="compare">横比 anchor</button>
+    </div>
+
+    <div class="tab-content active" id="tab-main">
+      <div class="results-grid">
+        <div class="card">
+          <h3>核心数</h3>
+          <div id="core-stats"></div>
+        </div>
+        <div class="card">
+          <h3>形状 ratios</h3>
+          <div id="ratios"></div>
+        </div>
+        <div class="card">
+          <h3>KV cache (BF16)</h3>
+          <div id="kv-cache"></div>
+        </div>
+        <div class="card">
+          <h3>推理 latency (H100)</h3>
+          <div id="latency-summary"></div>
+        </div>
+      </div>
+      <div class="notes" id="notes-line"></div>
+    </div>
+
+    <div class="tab-content" id="tab-params">
+      <div class="card">
+        <h3>Params breakdown</h3>
+        <div id="params-breakdown"></div>
+      </div>
+      <div class="card" id="hybrid-card" style="margin-top: 12px; display: none;">
+        <h3>Hybrid attention 层布局</h3>
+        <div id="hybrid-info"></div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-latency">
+      <div class="results-grid">
+        <div class="card">
+          <h3>Decode (memory-bound)</h3>
+          <div id="decode-detail"></div>
+        </div>
+        <div class="card">
+          <h3>Prefill (compute-bound)</h3>
+          <div id="prefill-detail"></div>
+        </div>
+        <div class="card">
+          <h3>训练成本估算</h3>
+          <div id="training-cost"></div>
+        </div>
+        <div class="card">
+          <h3>注释</h3>
+          <div class="kv-row"><span class="k">decode 公式</span><span class="v">active_bytes / (HBM_BW × η)</span></div>
+          <div class="kv-row"><span class="k">prefill</span><span class="v">2 × active × N + 2 × heads × d × N² × L</span></div>
+          <div class="kv-row"><span class="k">training FLOPs</span><span class="v">6 × active × tokens (Chinchilla)</span></div>
+          <div class="kv-row"><span class="k">MTP speedup</span><span class="v">1 + accept_rate × mtp_depth</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-checks">
+      <div class="card">
+        <h3>设计不变量校验</h3>
+        <div id="checks-list"></div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-compare">
+      <div class="compare-controls">
+        <span>选 anchor 跟你的 spec 比：</span>
+        <select id="cmp-a"><option value="">— 不选 —</option></select>
+        <select id="cmp-b"><option value="">— 不选 —</option></select>
+      </div>
+      <div class="card">
+        <h3>横比</h3>
+        <div id="compare-table-wrap"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// =================================================================
+// MoE Architecture Calculator — JavaScript port of calc/spec.py
+// =================================================================
+
+const DTypeBytes = {bf16: 2, fp16: 2, fp8: 1, fp32: 4, int8: 1};
+
+// ---------- AttnLayerSpec params/KV/FLOPs ----------
+function attnLayerParams(layer, hidden) {
+  if (layer.kind === "softmax" || layer.kind === "swa") {
+    const q = hidden * layer.num_q_heads * layer.head_dim;
+    const k = hidden * layer.num_kv_heads * layer.head_dim;
+    const v = hidden * layer.num_kv_heads * layer.head_dim;
+    const o = layer.num_q_heads * layer.head_dim * hidden;
+    return q + k + v + o;
+  } else if (layer.kind === "linear") {
+    const vh = layer.linear_num_value_heads || layer.num_q_heads;
+    const vd = layer.linear_value_head_dim || layer.head_dim;
+    const q = hidden * layer.num_q_heads * layer.head_dim;
+    const k = hidden * layer.num_kv_heads * layer.head_dim;
+    const v = hidden * vh * vd;
+    const o = vh * vd * hidden;
+    const gate = hidden * vh * vd;
+    const conv = hidden * (layer.conv_kernel || 0);
+    return q + k + v + o + gate + conv;
+  } else if (layer.kind === "mamba") {
+    return 3 * hidden * hidden + hidden * (layer.state_dim || 16) * 2;
+  }
+  return 0;
+}
+
+function attnLayerKVAt(layer, ctx, dtypeBytes) {
+  if (layer.kind === "softmax") {
+    return 2 * layer.num_kv_heads * layer.head_dim * dtypeBytes * ctx;
+  } else if (layer.kind === "swa") {
+    const eff = Math.min(ctx, layer.window_size || ctx);
+    return 2 * layer.num_kv_heads * layer.head_dim * dtypeBytes * eff;
+  } else if (layer.kind === "linear") {
+    const vh = layer.linear_num_value_heads || layer.num_q_heads;
+    const vd = layer.linear_value_head_dim || layer.head_dim;
+    return layer.num_kv_heads * vh * vd * dtypeBytes;
+  } else if (layer.kind === "mamba") {
+    return (layer.state_dim || 16) * dtypeBytes * 2;
+  }
+  return 0;
+}
+
+function attnLayerQuadFlops(layer, seqLen) {
+  if (layer.kind === "softmax") {
+    return 4 * layer.num_q_heads * layer.head_dim * seqLen * seqLen;
+  } else if (layer.kind === "swa") {
+    const eff = Math.min(seqLen, layer.window_size || seqLen);
+    return 4 * layer.num_q_heads * layer.head_dim * seqLen * eff;
+  } else if (layer.kind === "linear") {
+    const vd = layer.linear_value_head_dim || layer.head_dim;
+    return 2 * layer.num_q_heads * layer.head_dim * vd * seqLen;
+  } else if (layer.kind === "mamba") {
+    return 16 * seqLen * (layer.state_dim || 16);
+  }
+  return 0;
+}
+
+// ---------- MoEArchSpec computations ----------
+function computeAll(spec) {
+  const h = spec.hidden;
+  const L = spec.num_layers;
+  const nMoE = L - spec.first_k_dense;
+  const denseInt = spec.dense_intermediate || (spec.top_k + spec.n_shared) * spec.d_expert;
+
+  // Attention params (uniform or hybrid)
+  let attnTotal = 0;
+  if (spec.hybrid_attn && spec.hybrid_attn.length > 0) {
+    for (const [count, ls] of spec.hybrid_attn) {
+      attnTotal += count * attnLayerParams(ls, h);
+    }
+  } else {
+    if (spec.attn_type === "mla") {
+      const qNope = spec.qk_nope_head_dim, qRope = spec.qk_rope_head_dim;
+      const vDim = spec.v_head_dim, nh = spec.num_q_heads;
+      const kvR = spec.kv_lora_rank;
+      let qTotal;
+      if (spec.q_lora_rank) {
+        qTotal = h * spec.q_lora_rank + spec.q_lora_rank * nh * (qNope + qRope);
+      } else {
+        qTotal = h * nh * (qNope + qRope);
+      }
+      const kvA = h * (kvR + qRope);
+      const kvB = kvR * nh * (qNope + vDim);
+      const o = nh * vDim * h;
+      attnTotal = (qTotal + kvA + kvB + o) * L;
+    } else {
+      const perLayer = h * spec.num_q_heads * spec.head_dim * 2 + h * spec.num_kv_heads * spec.head_dim * 2;
+      attnTotal = perLayer * L;
+    }
+  }
+
+  // FFN
+  const ffnDense = 3 * h * denseInt;
+  const ffnDenseTotal = ffnDense * spec.first_k_dense;
+  const perExpert = 3 * h * spec.d_expert;
+  const moeRoutedTotal = spec.n_routed * perExpert * nMoE;
+  const moeSharedTotal = spec.n_shared * perExpert * nMoE;
+  const moeActivePerLayer = (spec.top_k + spec.n_shared) * perExpert;
+  const moeActiveTotal = moeActivePerLayer * nMoE;
+  const routerPerLayer = h * spec.n_routed;
+  const routerTotal = routerPerLayer * nMoE;
+
+  // Embedding
+  const emb = spec.vocab_size * h * (spec.tied_embedding ? 1 : 2);
+
+  // MTP
+  let mtpParams = 0;
+  if (spec.mtp_depth > 0) {
+    const perMod = (attnTotal / L) + (spec.mtp_is_moe
+      ? (moeRoutedTotal / nMoE + moeSharedTotal / nMoE + routerPerLayer)
+      : ffnDense) + 2 * h * h;
+    mtpParams = spec.mtp_depth * perMod;
+  }
+
+  const total = emb + attnTotal + ffnDenseTotal + moeRoutedTotal + moeSharedTotal + routerTotal + mtpParams;
+  const totalNoMtp = total - mtpParams;
+  const activeStrict = attnTotal + ffnDenseTotal + moeActiveTotal + routerTotal;
+  const activeV3 = activeStrict + emb;
+
+  // Per-layer (avg for hybrid)
+  const attnPerLayer = attnTotal / L;
+  const attnFfnRatio = attnPerLayer / moeActivePerLayer;
+
+  // Activation rates
+  const rates = {
+    active_over_total: activeStrict / totalNoMtp,
+    expert_slot: (spec.top_k + spec.n_shared) / (spec.n_routed + spec.n_shared),
+    routed_only: spec.top_k / spec.n_routed,
+  };
+
+  // KV cache at multiple ctx
+  function kvAtCtx(ctx, dtype) {
+    const b = DTypeBytes[dtype];
+    if (spec.hybrid_attn && spec.hybrid_attn.length > 0) {
+      let t = 0;
+      for (const [count, ls] of spec.hybrid_attn) {
+        t += count * attnLayerKVAt(ls, ctx, b);
+      }
+      return t;
+    }
+    if (spec.attn_type === "mla") {
+      return (spec.kv_lora_rank + spec.qk_rope_head_dim) * b * ctx * L;
+    }
+    return 2 * spec.num_kv_heads * spec.head_dim * b * ctx * L;
+  }
+
+  // Decode latency
+  const ctxDecode = spec.kv_seq_len || 4096;
+  const dtype = "bf16";
+  const activeBytes = activeStrict * DTypeBytes[dtype];
+  const kvBytes = kvAtCtx(ctxDecode, dtype);
+  const effBw = spec.hbm_bw * 1e9 * spec.bw_frac;
+  const decodeMs = (activeBytes + kvBytes) / effBw * 1000;
+  const mtpX = spec.mtp_depth > 0 ? 1 + spec.mtp_accept * spec.mtp_depth : 1.0;
+
+  // Prefill
+  const n = ctxDecode;
+  const projFlops = 2 * activeV3 * n;
+  let attnQuad = 0;
+  if (spec.hybrid_attn && spec.hybrid_attn.length > 0) {
+    for (const [count, ls] of spec.hybrid_attn) {
+      attnQuad += count * attnLayerQuadFlops(ls, n);
+    }
+  } else {
+    const hd = spec.attn_type === "mla" ? (spec.qk_nope_head_dim + spec.qk_rope_head_dim) : spec.head_dim;
+    attnQuad = 2 * spec.num_q_heads * hd * n * n * L;
+  }
+  const totalFlopsPrefill = projFlops + attnQuad;
+  const gpuPeakTflops = 989; // H100 BF16
+  const prefillMfu = 0.5;
+  const timeSec = totalFlopsPrefill / (gpuPeakTflops * 1e12 * prefillMfu);
+  const prefillTps = n / timeSec;
+
+  // Training cost
+  const trainTokens = (spec.train_tokens_t || 20) * 1e12;
+  const trainFlops = 6 * activeStrict * trainTokens;
+  const trainSec = trainFlops / (gpuPeakTflops * 1e12 * spec.mfu);
+  const trainDays = trainSec / spec.num_gpus / 86400;
+  const trainCost = trainSec / 3600 * spec.price_per_hour;
+
+  // Invariants
+  const checks = [];
+  if (!spec.hybrid_attn && (spec.attn_type === "gqa" || spec.attn_type === "mha")) {
+    const qTotal = spec.num_q_heads * spec.head_dim;
+    checks.push({
+      name: "num_q × head_dim = hidden",
+      ok: qTotal === h,
+      msg: `${spec.num_q_heads}×${spec.head_dim}=${qTotal} vs hidden=${h}`,
+      sev: qTotal === h ? "ok" : "warn"
+    });
+    if (spec.attn_type === "gqa") {
+      const r = spec.num_q_heads / spec.num_kv_heads;
+      checks.push({
+        name: "GQA Q:KV integer ratio",
+        ok: Number.isInteger(r),
+        msg: `Q/KV = ${spec.num_q_heads}/${spec.num_kv_heads} = ${r.toFixed(2)}`,
+        sev: Number.isInteger(r) ? "ok" : "err"
+      });
+    }
+  }
+  const denseExpected = (spec.top_k + spec.n_shared) * spec.d_expert;
+  const denseDev = Math.abs(denseInt - denseExpected) / denseExpected;
+  checks.push({
+    name: "dense_int = (K+N_sh) × d_expert",
+    ok: denseDev < 0.05,
+    msg: `dense_int=${denseInt}, expected=${denseExpected}, dev=${(denseDev*100).toFixed(1)}%`,
+    sev: denseDev < 0.05 ? "ok" : "warn"
+  });
+  const r = attnFfnRatio;
+  const inBand = r >= 0.30 && r <= 0.70;
+  // Hybrid models have different convention
+  const isHybrid = spec.hybrid_attn && spec.hybrid_attn.length > 0;
+  checks.push({
+    name: "Attn:FFN per layer (V3 派 1:2 band)",
+    ok: inBand || isHybrid,  // hybrid is exempt
+    msg: `attn/ffn = 1:${(1/r).toFixed(2)} (r=${r.toFixed(3)})${isHybrid ? " — hybrid model, 1:2 rule not applicable" : ""}`,
+    sev: (inBand || isHybrid) ? "ok" : "warn"
+  });
+  const rho = spec.d_expert / h;
+  const target = 4 / (3 * (spec.top_k + spec.n_shared));
+  checks.push({
+    name: "d_expert/hidden ≈ 4/(3(K+N_sh))",
+    ok: true,
+    msg: `d_expert/hidden = ${rho.toFixed(3)}, ideal = ${target.toFixed(3)}${rho > 2*target ? " (偏大)" : rho < 0.5*target ? " (偏小)" : " ✓"}`,
+    sev: "ok"
+  });
+  const okSet = new Set([32, 64, 128, 160, 192, 256, 288, 320, 384, 512, 640]);
+  checks.push({
+    name: "N_routed EP-friendly",
+    ok: okSet.has(spec.n_routed),
+    msg: `N_routed=${spec.n_routed}${okSet.has(spec.n_routed) ? " ∈ standard set" : ""}`,
+    sev: okSet.has(spec.n_routed) ? "ok" : "warn"
+  });
+
+  return {
+    total, totalNoMtp, activeStrict, activeV3,
+    attnTotal, ffnDenseTotal, moeRoutedTotal, moeSharedTotal, routerTotal, mtpParams,
+    emb, attnPerLayer, moeActivePerLayer, attnFfnRatio, rates,
+    kv_32k: kvAtCtx(32768, "bf16"),
+    kv_128k: kvAtCtx(131072, "bf16"),
+    kv_1m: kvAtCtx(1048576, "bf16"),
+    decode: { activeBytes, kvBytes, total_ms: decodeMs, tps: 1000 / decodeMs, mtp_x: mtpX,
+              tps_mtp: 1000 / decodeMs * mtpX, ms_mtp: decodeMs / mtpX },
+    prefill: { totalFlops: totalFlopsPrefill, projFlops, attnQuad,
+               attnQuadPct: attnQuad / totalFlopsPrefill * 100,
+               timeSec, tps: prefillTps, ms_per_token: timeSec * 1000 / n },
+    training: { tokens: trainTokens, flops: trainFlops, days: trainDays, cost: trainCost,
+                gpu_hours: trainSec / 3600 },
+    checks, denseInt, l_sqrt_h: L / Math.sqrt(h),
+  };
+}
+
+// =================================================================
+// Anchor specs (must match calc/anchors.py)
+// =================================================================
+const ANCHORS = {
+  "v2-lite": {
+    name: "DeepSeek-V2-Lite (15.7B/2.4B, MLA)",
+    hidden: 2048, num_layers: 27, head_dim: 128,
+    num_q_heads: 16, num_kv_heads: 16, attn_type: "mla",
+    q_lora_rank: 0, kv_lora_rank: 512,
+    qk_nope_head_dim: 128, qk_rope_head_dim: 64, v_head_dim: 128,
+    n_routed: 64, top_k: 6, n_shared: 2, d_expert: 1408,
+    first_k_dense: 1, dense_intermediate: 10944,
+    vocab_size: 102400, tied_embedding: false, mtp_depth: 0,
+  },
+  "moonlight": {
+    name: "Moonlight-16B-A3B (Moonshot, Muon)",
+    hidden: 2048, num_layers: 27, head_dim: 128,
+    num_q_heads: 16, num_kv_heads: 16, attn_type: "gqa",
+    n_routed: 64, top_k: 6, n_shared: 2, d_expert: 1408,
+    first_k_dense: 1, dense_intermediate: 10944,
+    vocab_size: 163840, mtp_depth: 0,
+  },
+  "ling-mini-2": {
+    name: "Ling-mini-2.0 (16B/1.4B)",
+    hidden: 2048, num_layers: 20, head_dim: 128,
+    num_q_heads: 16, num_kv_heads: 8, attn_type: "gqa",
+    n_routed: 256, top_k: 8, n_shared: 1, d_expert: 512,
+    first_k_dense: 1, dense_intermediate: 5120,
+    vocab_size: 156000, mtp_depth: 1, mtp_is_moe: false,
+  },
+  "ling-flash-2": {
+    name: "Ling-flash-2.0 (103B/6.1B)",
+    hidden: 4096, num_layers: 32, head_dim: 128,
+    num_q_heads: 32, num_kv_heads: 16, attn_type: "gqa",
+    n_routed: 256, top_k: 8, n_shared: 1, d_expert: 1024,
+    first_k_dense: 1, dense_intermediate: 9216,
+    vocab_size: 156000, mtp_depth: 1, mtp_is_moe: false,
+  },
+  "glm-4.5-air": {
+    name: "GLM-4.5-Air (106B/12B)",
+    hidden: 4096, num_layers: 46, head_dim: 128,
+    num_q_heads: 96, num_kv_heads: 8, attn_type: "gqa",
+    n_routed: 128, top_k: 8, n_shared: 1, d_expert: 1408,
+    first_k_dense: 1, dense_intermediate: 10944,
+    vocab_size: 151552, mtp_depth: 1, mtp_is_moe: false,
+  },
+  "dots1": {
+    name: "dots.llm1 (142B/14B, MHA)",
+    hidden: 4096, num_layers: 62, head_dim: 128,
+    num_q_heads: 32, num_kv_heads: 32, attn_type: "mha",
+    n_routed: 128, top_k: 6, n_shared: 2, d_expert: 1408,
+    first_k_dense: 1, dense_intermediate: 10944,
+    vocab_size: 152064, mtp_depth: 0,
+  },
+  "glm-4.5": {
+    name: "GLM-4.5 (355B/32B)",
+    hidden: 5120, num_layers: 92, head_dim: 128,
+    num_q_heads: 96, num_kv_heads: 8, attn_type: "gqa",
+    n_routed: 160, top_k: 8, n_shared: 1, d_expert: 1536,
+    first_k_dense: 3, dense_intermediate: 12288,
+    vocab_size: 151552, mtp_depth: 1, mtp_is_moe: false,
+  },
+  "v3": {
+    name: "DeepSeek-V3 (671B/37B, MLA)",
+    hidden: 7168, num_layers: 61, head_dim: 192,
+    num_q_heads: 128, num_kv_heads: 128, attn_type: "mla",
+    q_lora_rank: 1536, kv_lora_rank: 512,
+    qk_nope_head_dim: 128, qk_rope_head_dim: 64, v_head_dim: 128,
+    n_routed: 256, top_k: 8, n_shared: 1, d_expert: 2048,
+    first_k_dense: 3, dense_intermediate: 18432,
+    vocab_size: 129280, mtp_depth: 1, mtp_is_moe: true,
+  },
+  "k2": {
+    name: "Kimi K2 (1T/32B, MLA + MuonClip)",
+    hidden: 7168, num_layers: 61, head_dim: 192,
+    num_q_heads: 64, num_kv_heads: 64, attn_type: "mla",
+    q_lora_rank: 1536, kv_lora_rank: 512,
+    qk_nope_head_dim: 128, qk_rope_head_dim: 64, v_head_dim: 128,
+    n_routed: 384, top_k: 8, n_shared: 1, d_expert: 2048,
+    first_k_dense: 1, dense_intermediate: 18432,
+    vocab_size: 163840, mtp_depth: 0,
+  },
+  "ling-1t": {
+    name: "Ling-1T (1T/51B, GQA + FP8)",
+    hidden: 8192, num_layers: 80, head_dim: 128,
+    num_q_heads: 64, num_kv_heads: 32, attn_type: "gqa",
+    n_routed: 256, top_k: 8, n_shared: 1, d_expert: 2048,
+    first_k_dense: 4, dense_intermediate: 18432,
+    vocab_size: 156000, mtp_depth: 1, mtp_is_moe: false,
+  },
+  "step-3.5-flash": {
+    name: "Step 3.5 Flash (196B/11B, SWA+Full hybrid)",
+    hidden: 5120, num_layers: 45, head_dim: 128,
+    num_q_heads: 64, num_kv_heads: 8, attn_type: "gqa",
+    hybrid_attn: [
+      [12, {kind: "softmax", num_q_heads: 64, num_kv_heads: 8, head_dim: 128}],
+      [33, {kind: "swa", num_q_heads: 96, num_kv_heads: 8, head_dim: 128, window_size: 512}],
+    ],
+    n_routed: 288, top_k: 8, n_shared: 1, d_expert: 1024,
+    first_k_dense: 3, dense_intermediate: 9216,
+    vocab_size: 131072, mtp_depth: 3, mtp_is_moe: false,
+  },
+  "qwen3-next": {
+    name: "Qwen3-Next-80B (80B/3B, DeltaNet+Full hybrid)",
+    hidden: 2048, num_layers: 48, head_dim: 256,
+    num_q_heads: 16, num_kv_heads: 2, attn_type: "gqa",
+    hybrid_attn: [
+      [36, {kind: "linear", num_q_heads: 16, num_kv_heads: 16, head_dim: 128,
+            linear_num_value_heads: 32, linear_value_head_dim: 128, conv_kernel: 4}],
+      [12, {kind: "softmax", num_q_heads: 16, num_kv_heads: 2, head_dim: 256}],
+    ],
+    n_routed: 512, top_k: 10, n_shared: 1, d_expert: 512,
+    first_k_dense: 0, dense_intermediate: 5632,
+    vocab_size: 151936, mtp_depth: 1, mtp_is_moe: false,
+  },
+  "mixtral-8x7b": {
+    name: "Mixtral 8x7B (46.7B/12.9B)",
+    hidden: 4096, num_layers: 32, head_dim: 128,
+    num_q_heads: 32, num_kv_heads: 8, attn_type: "gqa",
+    n_routed: 8, top_k: 2, n_shared: 0, d_expert: 14336,
+    first_k_dense: 0, dense_intermediate: 14336,
+    vocab_size: 32000, mtp_depth: 0,
+  },
+  "olmoe": {
+    name: "OLMoE-1B-7B (6.9B/1.3B)",
+    hidden: 2048, num_layers: 16, head_dim: 128,
+    num_q_heads: 16, num_kv_heads: 16, attn_type: "mha",
+    n_routed: 64, top_k: 8, n_shared: 0, d_expert: 1024,
+    first_k_dense: 0, dense_intermediate: 1024,
+    vocab_size: 50304, mtp_depth: 0,
+  },
+  "user-16b": {
+    name: "USER 16B Profile B' (20L/2560 short-wide)",
+    hidden: 2560, num_layers: 20, head_dim: 128,
+    num_q_heads: 20, num_kv_heads: 5, attn_type: "gqa",
+    n_routed: 64, top_k: 8, n_shared: 1, d_expert: 1536,
+    first_k_dense: 1, dense_intermediate: 13824,
+    vocab_size: 128256, mtp_depth: 1, mtp_is_moe: false,
+  },
+  "user-l100-v2": {
+    name: "USER L100 v2 (105B/9.7B, 32L/64Q)",
+    hidden: 4096, num_layers: 32, head_dim: 128,
+    num_q_heads: 64, num_kv_heads: 8, attn_type: "gqa",
+    n_routed: 128, top_k: 8, n_shared: 1, d_expert: 2048,
+    first_k_dense: 1, dense_intermediate: 18432,
+    vocab_size: 128256, mtp_depth: 1, mtp_is_moe: false,
+  },
+};
+
+// =================================================================
+// UI binding
+// =================================================================
+const FIELDS = [
+  "name","hidden","num_layers","first_k_dense","vocab_size","tied_embedding",
+  "attn_type","num_q_heads","num_kv_heads","head_dim",
+  "q_lora_rank","kv_lora_rank","qk_nope_head_dim","qk_rope_head_dim","v_head_dim",
+  "n_routed","top_k","n_shared","d_expert","dense_intermediate",
+  "mtp_depth","mtp_is_moe",
+  "kv_seq_len","hbm_bw","bw_frac","mtp_accept","train_tokens_t","num_gpus","price_per_hour","mfu",
+];
+
+function readSpec() {
+  const s = {};
+  for (const f of FIELDS) {
+    const el = document.getElementById(f);
+    if (!el) continue;
+    if (el.type === "checkbox") s[f] = el.checked;
+    else if (el.type === "number") s[f] = parseFloat(el.value) || 0;
+    else s[f] = el.value;
+  }
+  // Hybrid attn carried in spec if loaded from preset
+  if (window._hybridAttn) s.hybrid_attn = window._hybridAttn;
+  // MLA validation
+  if (s.attn_type !== "mla") {
+    s.q_lora_rank = 0; s.kv_lora_rank = 0;
+  }
+  return s;
+}
+
+function loadPreset(name) {
+  if (!name || !ANCHORS[name]) {
+    window._hybridAttn = null;
+    return;
+  }
+  const a = ANCHORS[name];
+  for (const k in a) {
+    const el = document.getElementById(k);
+    if (!el) continue;
+    if (el.type === "checkbox") el.checked = !!a[k];
+    else el.value = a[k];
+  }
+  // default unset
+  if (!a.q_lora_rank) document.getElementById("q_lora_rank").value = 0;
+  if (!a.kv_lora_rank) document.getElementById("kv_lora_rank").value = 0;
+  window._hybridAttn = a.hybrid_attn || null;
+  toggleMLA();
+  compute();
+}
+
+function toggleMLA() {
+  document.getElementById("mla-fields").style.display =
+    document.getElementById("attn_type").value === "mla" ? "block" : "none";
+}
+
+function fmt(n) {
+  if (typeof n !== "number" || isNaN(n)) return "—";
+  if (n >= 1e9) return (n/1e9).toFixed(2) + "B";
+  if (n >= 1e6) return (n/1e6).toFixed(1) + "M";
+  if (n >= 1e3) return (n/1e3).toFixed(1) + "K";
+  return n.toFixed(0);
+}
+function fmtPct(x) { return (x*100).toFixed(2) + "%"; }
+function fmtMB(b) { return (b/1024/1024).toFixed(0) + " MB"; }
+function fmtGB(b) { return (b/1024/1024/1024).toFixed(2) + " GB"; }
+function fmt$(n) {
+  if (n > 1e6) return "$" + (n/1e6).toFixed(2) + "M";
+  if (n > 1e3) return "$" + (n/1e3).toFixed(1) + "K";
+  return "$" + n.toFixed(0);
+}
+function row(k, v, major=false) {
+  return `<div class="kv-row ${major?'major':''}"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+}
+
+function render(r, spec) {
+  // Core stats
+  document.getElementById("core-stats").innerHTML =
+    row("Total params", fmt(r.totalNoMtp), true) +
+    row("Active (strict)", fmt(r.activeStrict)) +
+    row("Active (V3 口径, +emb)", fmt(r.activeV3)) +
+    row("active/total", fmtPct(r.rates.active_over_total) + ` (1/${(1/r.rates.active_over_total).toFixed(1)})`) +
+    row("expert-slot fraction", fmtPct(r.rates.expert_slot)) +
+    row("routed-only fraction", fmtPct(r.rates.routed_only));
+
+  // Ratios
+  document.getElementById("ratios").innerHTML =
+    row("L / √hidden", r.l_sqrt_h.toFixed(3)) +
+    row("d_expert / hidden", (spec.d_expert / spec.hidden).toFixed(3)) +
+    row("Attn:FFN per layer", `1:${(1/r.attnFfnRatio).toFixed(2)}`, true) +
+    row("dense intermediate", r.denseInt + (r.denseInt === (spec.top_k + spec.n_shared) * spec.d_expert ? " ✓" : "")) +
+    row("# MoE layers", spec.num_layers - spec.first_k_dense);
+
+  // KV cache
+  document.getElementById("kv-cache").innerHTML =
+    row("32K ctx", fmtMB(r.kv_32k)) +
+    row("128K ctx", fmtGB(r.kv_128k)) +
+    row("1M ctx", fmtGB(r.kv_1m));
+
+  // Latency summary
+  document.getElementById("latency-summary").innerHTML =
+    row("Decode latency", r.decode.total_ms.toFixed(2) + " ms/tok") +
+    row("Decode TPS (base)", r.decode.tps.toFixed(0)) +
+    (spec.mtp_depth > 0
+      ? row("Decode TPS (w/ MTP " + spec.mtp_depth + ")", r.decode.tps_mtp.toFixed(0), true)
+      : "") +
+    row(`Prefill TPS @ ${spec.kv_seq_len}`, r.prefill.tps.toFixed(0));
+
+  // Notes
+  document.getElementById("notes-line").innerHTML =
+    `Embedding ${fmtPct(r.emb / r.totalNoMtp)} · Attn ${fmtPct(r.attnTotal / r.totalNoMtp)} · ` +
+    `Routed FFN ${fmtPct(r.moeRoutedTotal / r.totalNoMtp)} · ` +
+    `${spec.attn_type ? spec.attn_type.toUpperCase() : ''} ${spec.num_q_heads}Q/${spec.num_kv_heads}KV head_dim ${spec.head_dim}`;
+
+  // Params breakdown
+  const pb = [
+    ["embedding", r.emb],
+    ["attn_total", r.attnTotal],
+    ["dense_ffn", r.ffnDenseTotal],
+    ["moe_ffn_routed", r.moeRoutedTotal],
+    ["moe_ffn_shared", r.moeSharedTotal],
+    ["router", r.routerTotal],
+    ["mtp", r.mtpParams],
+  ];
+  document.getElementById("params-breakdown").innerHTML = pb.map(([k, v]) =>
+    row(k, `${fmt(v)} (${(v/r.total*100).toFixed(2)}%)`)
+  ).join("") + row("TOTAL", fmt(r.total), true);
+
+  // Hybrid card
+  if (spec.hybrid_attn && spec.hybrid_attn.length > 0) {
+    document.getElementById("hybrid-card").style.display = "block";
+    document.getElementById("hybrid-info").innerHTML = spec.hybrid_attn.map(([c, ls]) => {
+      let extra = "";
+      if (ls.kind === "swa") extra = ` W=${ls.window_size}`;
+      else if (ls.kind === "linear") extra = ` linear V=${ls.linear_num_value_heads || ls.num_q_heads}h×${ls.linear_value_head_dim || ls.head_dim}d`;
+      return `<div class="hybrid-row"><span class="count">${c}×</span><span>${ls.kind} ${ls.num_q_heads}Q/${ls.num_kv_heads}KV d=${ls.head_dim}${extra} (per-layer params: ${fmt(attnLayerParams(ls, spec.hidden))})</span></div>`;
+    }).join("");
+  } else {
+    document.getElementById("hybrid-card").style.display = "none";
+  }
+
+  // Decode detail
+  document.getElementById("decode-detail").innerHTML =
+    row("Active bytes", fmtGB(r.decode.activeBytes)) +
+    row("KV cache @ decode ctx", fmtGB(r.decode.kvBytes)) +
+    row("Total per token", r.decode.total_ms.toFixed(2) + " ms") +
+    row("Base TPS", r.decode.tps.toFixed(0), true) +
+    (spec.mtp_depth > 0 ? row(`MTP D=${spec.mtp_depth} speedup`, r.decode.mtp_x.toFixed(2) + "×") : "") +
+    (spec.mtp_depth > 0 ? row("Effective TPS", r.decode.tps_mtp.toFixed(0), true) : "");
+
+  // Prefill detail
+  document.getElementById("prefill-detail").innerHTML =
+    row(`Seq len`, spec.kv_seq_len) +
+    row("Total FLOPs", r.prefill.totalFlops.toExponential(2)) +
+    row("Attn quadratic %", r.prefill.attnQuadPct.toFixed(1) + "%") +
+    row("Time per token", r.prefill.ms_per_token.toFixed(3) + " ms") +
+    row("Prefill TPS", r.prefill.tps.toFixed(0), true);
+
+  // Training cost
+  document.getElementById("training-cost").innerHTML =
+    row("Train tokens", (r.training.tokens / 1e12).toFixed(1) + "T") +
+    row("Total FLOPs", r.training.flops.toExponential(2)) +
+    row("GPU-hours", fmt(r.training.gpu_hours)) +
+    row("Wall-clock days", r.training.days.toFixed(1) + ` (${spec.num_gpus} GPU)`) +
+    row("Estimated $", fmt$(r.training.cost), true);
+
+  // Checks
+  document.getElementById("checks-list").innerHTML = r.checks.map(c => {
+    const icon = c.ok ? "✅" : (c.sev === "err" ? "❌" : "⚠️");
+    return `<div class="check ${c.sev}"><span class="icon">${icon}</span>
+            <div class="body"><div class="name">${c.name}</div><div class="msg">${c.msg}</div></div></div>`;
+  }).join("");
+
+  // Compare
+  renderCompare(spec, r);
+}
+
+function renderCompare(spec, r) {
+  const a = document.getElementById("cmp-a").value;
+  const b = document.getElementById("cmp-b").value;
+  if (!a && !b) {
+    document.getElementById("compare-table-wrap").innerHTML = "<p style='color:var(--text-dim)'>选两个 anchor 看横比</p>";
+    return;
+  }
+  const specs = [{...spec, _label: "YOUR SPEC", _r: r}];
+  if (a) { const s = {...ANCHORS[a], _label: a}; s._r = computeAll(s); specs.push(s); }
+  if (b) { const s = {...ANCHORS[b], _label: b}; s._r = computeAll(s); specs.push(s); }
+
+  const rows = [
+    ["Name", s => s.name || "(custom)"],
+    ["Layers", s => s.num_layers],
+    ["Hidden", s => s.hidden],
+    ["Q/KV", s => `${s.num_q_heads}/${s.num_kv_heads}`],
+    ["head_dim", s => s.head_dim],
+    ["Attn type", s => s.hybrid_attn ? "hybrid" : s.attn_type],
+    ["N routed", s => s.n_routed],
+    ["Top-K", s => s.top_k],
+    ["d_expert", s => s.d_expert],
+    ["—"],
+    ["Total", s => fmt(s._r.totalNoMtp)],
+    ["Active (strict)", s => fmt(s._r.activeStrict)],
+    ["active/total", s => fmtPct(s._r.rates.active_over_total)],
+    ["L/√H", s => s._r.l_sqrt_h.toFixed(2)],
+    ["d_expert/hidden", s => (s.d_expert / s.hidden).toFixed(3)],
+    ["Attn:FFN", s => `1:${(1/s._r.attnFfnRatio).toFixed(2)}`],
+    ["—"],
+    ["KV @ 128K", s => fmtGB(s._r.kv_128k)],
+    ["Decode ms/tok", s => s._r.decode.total_ms.toFixed(2)],
+    ["Prefill TPS", s => s._r.prefill.tps.toFixed(0)],
+  ];
+
+  let html = "<table><thead><tr><th></th>";
+  for (const s of specs) html += `<th>${s._label}</th>`;
+  html += "</tr></thead><tbody>";
+  for (const [k, fn] of rows) {
+    if (k === "—") { html += `<tr><td colspan="${specs.length+1}" style="background:#eee;height:4px;padding:0"></td></tr>`; continue; }
+    html += `<tr><td><b>${k}</b></td>`;
+    for (const s of specs) {
+      try { html += `<td>${fn(s)}</td>`; } catch(e) { html += `<td>—</td>`; }
+    }
+    html += "</tr>";
+  }
+  html += "</tbody></table>";
+  document.getElementById("compare-table-wrap").innerHTML = html;
+}
+
+function compute() {
+  try {
+    const spec = readSpec();
+    const r = computeAll(spec);
+    render(r, spec);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// =================================================================
+// Init
+// =================================================================
+function init() {
+  // Populate preset dropdown
+  const presetSel = document.getElementById("preset");
+  const cmpA = document.getElementById("cmp-a");
+  const cmpB = document.getElementById("cmp-b");
+  const sortedKeys = Object.keys(ANCHORS).sort();
+  for (const k of sortedKeys) {
+    const opt = (text) => { const o = document.createElement("option"); o.value = k; o.textContent = text; return o; };
+    presetSel.appendChild(opt(`${k} — ${ANCHORS[k].name}`));
+    cmpA.appendChild(opt(k));
+    cmpB.appendChild(opt(k));
+  }
+  presetSel.addEventListener("change", e => loadPreset(e.target.value));
+  document.getElementById("attn_type").addEventListener("change", toggleMLA);
+
+  // Tab switching
+  document.querySelectorAll(".tabbar button").forEach(b => {
+    b.addEventListener("click", () => {
+      document.querySelectorAll(".tabbar button").forEach(x => x.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+      document.getElementById("tab-" + b.dataset.tab).classList.add("active");
+    });
+  });
+
+  // Bind all field changes
+  for (const f of FIELDS) {
+    const el = document.getElementById(f);
+    if (el) el.addEventListener("input", compute);
+  }
+  cmpA.addEventListener("change", compute);
+  cmpB.addEventListener("change", compute);
+
+  // Load default
+  loadPreset("user-l100-v2");
+}
+
+init();
+</script>
+
+</body>
+</html>

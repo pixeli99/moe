@@ -320,6 +320,7 @@ body.dark .katex { color: var(--text); }
   <div class="title">__HEADER_TITLE__</div>
   <div class="subtitle">__HEADER_SUB__</div>
   <div class="search-wrap">
+    <a href="calc.html" style="color:var(--accent);text-decoration:none;font-size:13px;font-weight:500;margin-right:8px;">🧮 Calculator</a>
     <input type="search" id="search" placeholder="按标题搜索…" />
     <button class="theme-toggle" id="theme-toggle" title="切换主题">🌓</button>
   </div>
